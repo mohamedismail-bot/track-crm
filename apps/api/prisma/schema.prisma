@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ContactStatus {
+  lead
+  prospect
+  customer
+  inactive
+}
+
+enum DealStage {
+  lead
+  qualified
+  proposal
+  negotiation
+  won
+  lost
+}
+
+enum ActivityType {
+  call
+  email
+  meeting
+  note
+  task
+}
+
+model Contact {
+  id        String        @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  title     String?
+  status    ContactStatus @default(lead)
+  tags      String        @default("[]")
+  notes     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  deals     Deal[]
+  activities Activity[]
+}
+
+model Deal {
+  id               String    @id @default(cuid())
+  name             String
+  contact          Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId        String
+  amount           Float
+  stage            DealStage @default(lead)
+  expectedCloseDate DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Activity {
+  id          String       @id @default(cuid())
+  contact     Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId   String
+  type        ActivityType
+  subject     String
+  description String?
+  createdAt   DateTime     @default(now())
+}

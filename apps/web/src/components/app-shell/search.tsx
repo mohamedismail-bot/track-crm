@@ -1,0 +1,169 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { Search, Plus, UserPlus } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { initials, formatFollowerCount } from "@/lib/display";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+
+interface SearchResult {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  platform: string | null;
+  handle: string | null;
+  followers: number | null;
+  stageName: string | null;
+  ownerName: string | null;
+  teamName: string | null;
+  relationship: "owned" | "same_team" | "other_team" | "available" | "none";
+}
+
+function useDebounced<T>(value: T, delay = 250): T {
+  const [debounced, setDebounced] = React.useState(value);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+export function SearchBox() {
+  const [query, setQuery] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const [results, setResults] = React.useState<SearchResult[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const debounced = useDebounced(query);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (debounced.trim().length < 2) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const controller = new AbortController();
+    fetch(`/api/search?q=${encodeURIComponent(debounced.trim())}`, {
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data: SearchResult[]) => {
+        setResults(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+    return () => controller.abort();
+  }, [debounced]);
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <div className="relative w-full max-w-md">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        { }
+        <Input
+          ref={inputRef}
+          className="pl-8"
+          placeholder="Search creators, handles, profiles..."
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (e.target.value.trim().length >= 2) setOpen(true);
+          }}
+          onFocus={() => {
+            if (query.trim().length >= 2) setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
+        />
+        <DropdownMenuTrigger asChild>
+          <button className="sr-only" tabIndex={-1} aria-hidden />
+        </DropdownMenuTrigger>
+      </div>
+      <DropdownMenuContent align="start" className="w-full max-w-md p-0">
+        {loading ? (
+          <div className="space-y-2 p-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : query.trim().length < 2 ? (
+          <DropdownMenuLabel className="p-3 text-xs font-normal text-muted-foreground">
+            Type at least 2 characters to search creators, platform handles or profile URLs.
+          </DropdownMenuLabel>
+        ) : results.length === 0 ? (
+          <DropdownMenuGroup className="p-2">
+            <DropdownMenuItem asChild>
+              <Link href="/creators?new=1" className="!h-auto py-2">
+                <Plus className="mr-2 h-4 w-4" />
+                + Add Creator &amp; Assign to Me
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        ) : (
+          <DropdownMenuGroup className="max-h-80 overflow-y-auto p-1">
+            {results.map((r) => (
+              <DropdownMenuItem key={r.id} asChild className="!h-auto !cursor-pointer py-0">
+                <Link href={`/creators/${r.id}`} className="flex w-full items-start gap-3 rounded-md px-2 py-2">
+                  <Avatar className="mt-0.5 h-8 w-8">
+                    {r.avatarUrl && <AvatarImage src={r.avatarUrl} alt={r.name} />}
+                    <AvatarFallback className="text-xs">{initials(r.name)}</AvatarFallback>
+                  </Avatar>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm font-medium">{r.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {r.handle ? `@${r.handle}` : ""} {r.stageName ? `· ${r.stageName}` : ""}{" "}
+                      {formatFollowerCount(r.followers) !== "—" ? `· ${formatFollowerCount(r.followers)}` : ""}
+                    </span>
+                  </span>
+                  {r.relationship === "other_team" && (
+                    <span className="ml-auto mt-0.5 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <UserPlus className="h-3 w-3" /> Other team
+                    </span>
+                  )}
+                  {r.relationship === "available" && (
+                    <span className="ml-auto mt-0.5 inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      Available
+                    </span>
+                  )}
+                  {r.relationship === "owned" && (
+                    <span className="ml-auto mt-0.5 inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                      You own
+                    </span>
+                  )}
+                </Link>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuItem asChild className="!h-auto">
+              <Link href="/creators?new=1" className="!h-auto py-2 text-xs text-muted-foreground">
+                <Plus className="mr-2 h-3.5 w-3.5" />
+                Add new creator
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function SearchTrigger() {
+  return (
+    <Button variant="outline" size="sm" className="text-muted-foreground">
+      <Search className="h-4 w-4" />
+      Search...
+    </Button>
+  );
+}

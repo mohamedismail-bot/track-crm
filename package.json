@@ -1,0 +1,16 @@
+{
+  "name": "track-crm",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "db:generate": "pnpm --filter @track-crm/api db:generate",
+    "db:migrate": "pnpm --filter @track-crm/api db:migrate"
+  }
+}

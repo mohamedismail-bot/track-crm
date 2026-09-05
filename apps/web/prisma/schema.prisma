@@ -1,0 +1,463 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+  X
+  SNAPCHAT
+  FACEBOOK
+  LINKEDIN
+  TWITCH
+  OTHER
+}
+
+enum DealType {
+  FIXED_BUDGET
+  COMMISSION
+  BARTER
+}
+
+enum Currency {
+  EGP
+  USD
+  EUR
+}
+
+enum DeliverableStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REVISION_REQUESTED
+}
+
+enum GiftStatus {
+  REQUESTED
+  APPROVED_QUEUED
+  DISPATCHED
+  DELIVERED
+  REJECTED
+}
+
+enum ActivityKind {
+  MANUAL
+  SYSTEM
+}
+
+enum ActivityType {
+  CALL
+  DM
+  EMAIL
+  MEETING
+  NOTE
+  STAGE_CHANGED
+  OWNERSHIP_CHANGED
+  GIFT_REQUESTED
+  GIFT_APPROVED
+  GIFT_REJECTED
+  GIFT_DISPATCHED
+  GIFT_DELIVERED
+  DELIVERABLE_SUBMITTED
+  DELIVERABLE_APPROVED
+  DELIVERABLE_REVISION_REQUESTED
+  ENGAGEMENT_CREATED
+  ENGAGEMENT_COMPLETED
+  CREATOR_CREATED
+  CREATOR_UPDATED
+  REQUEST_CREATED
+  REQUEST_RESOLVED
+}
+
+enum AvailRequestStatus {
+  PENDING_PRE_APPROVAL
+  PENDING_RELEASE
+  APPROVED
+  REJECTED
+}
+
+enum NotificationType {
+  DELIVERABLE_OVERDUE
+  DELIVERABLE_SUBMITTED
+  DELIVERABLE_APPROVED
+  DELIVERABLE_REVISION_REQUESTED
+  GIFT_EXCEPTION_REQUESTED
+  GIFT_DISPATCHED
+  GIFT_DELIVERED
+  GIFT_APPROVED
+  GIFT_REJECTED
+  AVAILABILITY_REQUESTED
+  AVAILABILITY_APPROVED
+  AVAILABILITY_REJECTED
+  ACTIVITY_MENTION
+}
+
+// ---------------------------------------------------------------------------
+// Users, Roles, Permissions, Teams
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  phone        String?  @unique
+  passwordHash String
+  displayName  String
+  avatarUrl    String?
+  roleId       String
+  teamId       String
+  archivedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role   Role @relation(fields: [roleId], references: [id])
+  team   Team @relation(fields: [teamId], references: [id])
+
+  transactionLogs       TransactionLog[]
+  ownerships            CreatorOwnership[]
+  requestedRequests     AvailabilityRequest[] @relation("Requester")
+  preApprovedRequests   AvailabilityRequest[] @relation("PreApprover")
+  releasedRequests      AvailabilityRequest[] @relation("ReleaseApprover")
+  rejectedRequests      AvailabilityRequest[] @relation("RequestRejector")
+  notifications         Notification[]
+  authoredActivityLogs  ActivityLog[]        @relation("ActivityAuthor")
+  submittedDeliverables Deliverable[]        @relation("DeliverableSubmitter")
+  reviewedDeliverables  Deliverable[]        @relation("DeliverableReviewer")
+  requestedGifts        Gift[]               @relation("GiftRequester")
+  approvedGifts         Gift[]               @relation("GiftApprover")
+  createdEngagements    Engagement[]         @relation("EngagementCreator")
+  createdCreators       Creator[]            @relation("CreatorCreator")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  immutable   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  users       User[]
+  permissions Permission[]
+}
+
+model Permission {
+  id     String @id @default(cuid())
+  action String @unique
+
+  roles Role[]
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  users                User[]
+  pipelineConfigs      PipelineConfig[]
+  creatorOwnerships    CreatorOwnership[]
+  engagements          Engagement[]
+  requestedRequests    AvailabilityRequest[] @relation("RequestingTeam")
+  owningRequests       AvailabilityRequest[] @relation("OwningTeam")
+}
+
+model TransactionLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  entityType String?
+  entityId   String?
+  detail     String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Creators
+// ---------------------------------------------------------------------------
+
+model Creator {
+  id            String   @id @default(cuid())
+  name          String
+  niche         String?
+  email         String?
+  phone         String?
+  city          String?
+  country       String?
+  creatorType   String?
+  followers     Int?
+  engagementRate Float?
+  notes         String?
+  avatarUrl     String?
+  createdById   String?
+  deletedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  primaryProfileId String?  @unique
+  primaryProfile   PlatformProfile? @relation("PrimaryProfile", fields: [primaryProfileId], references: [id])
+
+  profiles             PlatformProfile[]
+  ownerships           CreatorOwnership[]
+  engagements          Engagement[]
+  activityLogs         ActivityLog[]
+  availabilityRequests AvailabilityRequest[]
+
+  createdBy User? @relation("CreatorCreator", fields: [createdById], references: [id])
+
+  @@index([name])
+  @@index([deletedAt])
+}
+
+model PlatformProfile {
+  id          String   @id @default(cuid())
+  creatorId   String
+  platform    Platform
+  handle      String
+  normalizedHandle String
+  url         String
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  creator       Creator  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  primaryOfCreator Creator? @relation("PrimaryProfile")
+
+  @@unique([platform, normalizedHandle])
+  @@index([creatorId])
+}
+
+model CreatorOwnership {
+  id        String   @id @default(cuid())
+  creatorId String
+  userId    String
+  teamId    String
+  createdAt DateTime @default(now())
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team    Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([creatorId, userId, teamId])
+  @@index([teamId])
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline
+// ---------------------------------------------------------------------------
+
+model Stage {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  order       Int      @default(0)
+  isCompleted Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  engagements    Engagement[]
+  pipelineConfigs PipelineConfig[]
+}
+
+model PipelineConfig {
+  id          String @id @default(cuid())
+  teamId      String
+  stageId     String
+  order       Int    @default(0)
+  isCompleted Boolean @default(false)
+
+  team  Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  stage Stage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, stageId])
+}
+
+// ---------------------------------------------------------------------------
+// Engagements, Deliverables, Gifts
+// ---------------------------------------------------------------------------
+
+model Engagement {
+  id        String   @id @default(cuid())
+  creatorId String
+  teamId    String
+  title     String
+  dealType  DealType
+  amount    Float?
+  couponCode String?
+  commissionPercent Float?
+  currency  Currency
+  stageId   String
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  team    Team    @relation(fields: [teamId], references: [id])
+  stage   Stage   @relation(fields: [stageId], references: [id])
+  createdBy User  @relation("EngagementCreator", fields: [createdById], references: [id])
+
+  deliverables Deliverable[]
+  gifts        Gift[]
+
+  @@index([creatorId])
+  @@index([teamId])
+  @@index([stageId])
+}
+
+model Deliverable {
+  id            String   @id @default(cuid())
+  engagementId  String
+  title         String
+  type          String
+  dueDate       DateTime
+  status        DeliverableStatus @default(PENDING)
+  postedUrl     String?
+  postedDate    DateTime?
+  submittedById String?
+  submittedAt   DateTime?
+  reviewedById  String?
+  reviewComment String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  submittedBy User?     @relation("DeliverableSubmitter", fields: [submittedById], references: [id])
+  reviewedBy  User?     @relation("DeliverableReviewer", fields: [reviewedById], references: [id])
+
+  @@index([engagementId])
+  @@index([status])
+}
+
+model Gift {
+  id              String    @id @default(cuid())
+  engagementId    String
+  productName     String
+  productDescription String?
+  requestedById   String
+  requestedAt     DateTime  @default(now())
+  isException     Boolean   @default(false)
+  exceptionReason String?
+  status          GiftStatus @default(REQUESTED)
+  approvedById    String?
+  approvedAt      DateTime?
+  trackingNumber  String?
+  carrier         String?
+  dispatchedAt    DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  requestedBy User      @relation("GiftRequester", fields: [requestedById], references: [id])
+  approvedBy  User?     @relation("GiftApprover", fields: [approvedById], references: [id])
+
+  @@index([engagementId])
+  @@index([status, requestedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Activity Log
+// ---------------------------------------------------------------------------
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  creatorId   String
+  kind        ActivityKind
+  type        ActivityType
+  summary     String
+  description String?
+  authorId    String?
+  loggedAt    DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  author  User?   @relation("ActivityAuthor", fields: [authorId], references: [id])
+
+  attachments Attachment[]
+
+  @@index([creatorId, loggedAt])
+}
+
+model Attachment {
+  id            String   @id @default(cuid())
+  activityLogId String
+  filename      String
+  mimeType      String
+  size          Int
+  path          String
+  createdAt     DateTime @default(now())
+
+  activityLog ActivityLog @relation(fields: [activityLogId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Availability Request
+// ---------------------------------------------------------------------------
+
+model AvailabilityRequest {
+  id                String   @id @default(cuid())
+  creatorId         String
+  requestingTeamId  String
+  requestingUserId  String
+  owningTeamId      String
+  note              String?
+  status            AvailRequestStatus @default(PENDING_PRE_APPROVAL)
+  preApprovedById   String?
+  releasedById      String?
+  rejectedById      String?
+  rejectReason      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  resolvedAt        DateTime?
+
+  creator        Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  requestingTeam Team    @relation("RequestingTeam", fields: [requestingTeamId], references: [id])
+  owningTeam     Team    @relation("OwningTeam", fields: [owningTeamId], references: [id])
+  requester      User    @relation("Requester", fields: [requestingUserId], references: [id])
+  preApprovedBy  User?   @relation("PreApprover", fields: [preApprovedById], references: [id])
+  releasedBy     User?   @relation("ReleaseApprover", fields: [releasedById], references: [id])
+  rejectedBy     User?   @relation("RequestRejector", fields: [rejectedById], references: [id])
+
+  @@index([creatorId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id     String   @id @default(cuid())
+  userId String
+  type   NotificationType
+  title  String
+  body   String?
+  link   String?
+  readAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+// ---------------------------------------------------------------------------
+// Workspace Settings
+// ---------------------------------------------------------------------------
+
+model WorkspaceSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
