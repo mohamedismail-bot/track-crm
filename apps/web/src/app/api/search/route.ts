@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
+import { smartSearchWhere } from "@/lib/creators";
 import { addDays, isAfter } from "date-fns";
 
 export async function GET(req: NextRequest) {
@@ -18,11 +19,7 @@ export async function GET(req: NextRequest) {
   const creators = await prisma.creator.findMany({
     where: {
       deletedAt: null,
-      OR: [
-        { name: { contains: q } },
-        { profiles: { some: { handle: { contains: q } } } },
-        { profiles: { some: { normalizedHandle: { contains: q.toLowerCase() } } } },
-      ],
+      ...smartSearchWhere(q),
     },
     include: {
       primaryProfile: true,

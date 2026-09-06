@@ -512,6 +512,27 @@ export interface CreatorListFilters {
   custom?: Record<string, string>;
 }
 
+/**
+ * Smart-search predicate. Accepts a creator name, a bare handle, an `@`-handle,
+ * a pasted platform link, an email or a phone number. Every field matches
+ * partially (contains). Pasted links and `@`-handles are parsed into a canonical
+ * Platform Handle before matching against platform profiles.
+ */
+export function smartSearchWhere(qRaw: string): Prisma.CreatorWhereInput {
+  const q = qRaw.trim();
+  if (!q) return {};
+  const handle = handleFromInput(q);
+  const or: Prisma.CreatorWhereInput[] = [
+    { name: { contains: q } },
+    { email: { contains: q.toLowerCase() } },
+    { phone: { contains: q } },
+  ];
+  if (handle) {
+    or.push({ profiles: { some: { normalizedHandle: { contains: handle.toLowerCase() } } } });
+  }
+  return { OR: or };
+}
+
 /** Whether a user may see a pending/rejected creator. */
 export function canSeePendingCreator(
   user: SessionUser,
@@ -545,7 +566,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
 
   const where: Prisma.CreatorWhereInput = {
     deletedAt: null,
-    ...(filters.q ? { name: { contains: filters.q } } : {}),
+    ...(filters.q ? smartSearchWhere(filters.q) : {}),
     ...(filters.niche ? { niche: { contains: filters.niche } } : {}),
     ...(filters.platform ? { profiles: { some: { platform: filters.platform as Platform } } } : {}),
     ...(filters.owner ? { ownerships: { some: { userId: filters.owner } } } : {}),

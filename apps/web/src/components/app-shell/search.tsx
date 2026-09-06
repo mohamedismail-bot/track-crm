@@ -74,7 +74,7 @@ export function SearchBox() {
         <Input
           ref={inputRef}
           className="pl-8"
-          placeholder="Search creators, handles, profiles..."
+          placeholder="Search name, link, @handle, email or phone..."
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -100,7 +100,7 @@ export function SearchBox() {
           </div>
         ) : query.trim().length < 2 ? (
           <DropdownMenuLabel className="p-3 text-xs font-normal text-muted-foreground">
-            Type at least 2 characters to search creators, platform handles or profile URLs.
+            Type at least 2 characters to search by name, link, @handle, email or phone.
           </DropdownMenuLabel>
         ) : results.length === 0 ? (
           <DropdownMenuGroup className="p-2">

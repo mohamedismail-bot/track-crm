@@ -441,7 +441,8 @@ export function normalizeHandleFromUrl(rawUrl: string): string {
   const withoutWww = withoutProtocol.replace(/^www\./i, "");
   const withoutQuery = withoutWww.split(/[?#]/)[0];
   const segments = withoutQuery.replace(/\/+$/, "").split("/").filter(Boolean);
-  return (segments.at(-1) ?? segments[0] ?? withoutQuery).toLowerCase();
+  const last = segments.at(-1) ?? segments[0] ?? withoutQuery;
+  return last.replace(/^@+/, "").toLowerCase();
 }
 
 export function detectPlatformFromUrl(rawUrl: string): Platform {

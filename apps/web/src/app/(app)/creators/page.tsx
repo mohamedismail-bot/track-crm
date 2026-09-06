@@ -174,7 +174,7 @@ export default function CreatorsPage() {
             <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="w-48 pl-8 sm:w-56"
-              placeholder="Search…"
+              placeholder="Search name, link, @handle, email or phone…"
               value={filters.q}
               onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
             />

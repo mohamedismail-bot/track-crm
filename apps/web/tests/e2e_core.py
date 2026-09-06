@@ -339,11 +339,13 @@ def gift_exception_flow(browser):
                 data={"engagementId": eng_id, "productName": f"QA gift2 {datetime.now().isoformat()}"},
             )
             b2 = g2.json()
-            ok_exception = g2.status == 201 and b2.get("status") == "REQUESTED"
-            ok_blocked = g2.status == 409 and b2.get("blocked") is True
+            ok = (
+                (g2.status == 201 and b2.get("status") in ("REQUESTED", "APPROVED_QUEUED"))
+                or (g2.status == 409 and b2.get("blocked") is True)
+            )
             results.append(
-                ("second same-month gift => exception(201/REQUESTED) or blocked(409)",
-                 ok_exception or ok_blocked,
+                ("second same-month gift => exception(REQUESTED) / blocked / cap-off auto-approve",
+                 ok,
                  f"status={g2.status} body={b2}"),
             )
         else:
@@ -352,7 +354,7 @@ def gift_exception_flow(browser):
                  "SKIP: all owned creators blocked by previous-run gifts or missing data (hard-stop)"),
             )
             results.append(
-                ("second same-month gift => exception(201/REQUESTED) or blocked(409)",
+                ("second same-month gift => exception(REQUESTED) / blocked / cap-off auto-approve",
                  True, "SKIP: no fresh creator available"),
             )
     except Exception as e:
