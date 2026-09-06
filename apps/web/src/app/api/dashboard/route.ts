@@ -148,7 +148,6 @@ export async function GET() {
     id: o.creator.id,
     name: o.creator.name,
     handle: o.creator.primaryProfile?.handle ?? null,
-    avatarUrl: o.creator.avatarUrl,
   }));
 
   // Top gifted creators (last 90 days), with exception requests flagged.

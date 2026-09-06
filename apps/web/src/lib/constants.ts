@@ -161,6 +161,8 @@ export const SETTING_KEYS = {
   PASSWORD_MIN_LENGTH: "password.minLength",
   PASSWORD_COMPLEXITY: "password.complexity",
   GENDER_OPTIONS: "creator.genderOptions",
+  NICHE_OPTIONS: "creator.nicheOptions",
+  CUSTOM_FIELDS_ENABLED: "creator.customFieldsEnabled",
   APPROVAL_REQUIRED: "approval.requireCreatorApproval",
 } as const;
 
@@ -294,6 +296,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   [SETTING_KEYS.PASSWORD_MIN_LENGTH]: "8",
   [SETTING_KEYS.PASSWORD_COMPLEXITY]: "false",
   [SETTING_KEYS.GENDER_OPTIONS]: '["Male","Female","Other","Prefer not to say"]',
+  [SETTING_KEYS.NICHE_OPTIONS]:
+    '["Fashion","Beauty","Tech","Gaming","Food","Travel","Fitness","Family","Lifestyle","Automotive","Business","Sports","Other"]',
+  [SETTING_KEYS.CUSTOM_FIELDS_ENABLED]: "true",
   [SETTING_KEYS.APPROVAL_REQUIRED]: "false",
 };
 
@@ -302,6 +307,22 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_GENDER_OPTIONS = ["Male", "Female", "Other", "Prefer not to say"];
+
+export const DEFAULT_NICHE_OPTIONS = [
+  "Fashion",
+  "Beauty",
+  "Tech",
+  "Gaming",
+  "Food",
+  "Travel",
+  "Fitness",
+  "Family",
+  "Lifestyle",
+  "Automotive",
+  "Business",
+  "Sports",
+  "Other",
+];
 
 /** Custom-field types an Admin can pick from; built-in fields use semantic types. */
 export const CREATOR_FIELD_TYPES = {
@@ -360,7 +381,6 @@ export const SYSTEM_FIELD_DEFINITIONS: {
   { key: "engagementRate", label: "Engagement rate (%)", type: "number", required: false, order: 9 },
   { key: "shopifyRegistered", label: "Registered on Shopify", type: "boolean", required: false, order: 10 },
   { key: "notes", label: "Notes", type: "textarea", required: false, order: 11 },
-  { key: "avatarUrl", label: "Avatar URL", type: "text", required: false, order: 12 },
 ];
 
 /**

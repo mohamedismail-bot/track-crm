@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Search, Plus, UserPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { initials, formatFollowerCount } from "@/lib/display";
 import {
@@ -20,7 +20,6 @@ import { Button } from "@/components/ui/button";
 interface SearchResult {
   id: string;
   name: string;
-  avatarUrl: string | null;
   platform: string | null;
   handle: string | null;
   followers: number | null;
@@ -118,7 +117,6 @@ export function SearchBox() {
               <DropdownMenuItem key={r.id} asChild className="!h-auto !cursor-pointer py-0">
                 <Link href={`/creators/${r.id}`} className="flex w-full items-start gap-3 rounded-md px-2 py-2">
                   <Avatar className="mt-0.5 h-8 w-8">
-                    {r.avatarUrl && <AvatarImage src={r.avatarUrl} alt={r.name} />}
                     <AvatarFallback className="text-xs">{initials(r.name)}</AvatarFallback>
                   </Avatar>
                   <span className="flex min-w-0 flex-col">

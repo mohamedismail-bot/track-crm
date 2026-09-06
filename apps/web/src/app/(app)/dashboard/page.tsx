@@ -55,7 +55,7 @@ interface DashboardData {
   };
   pipeline: { stageId: string; name: string; count: number }[];
   leaderboard: { userId: string; name: string; creators: number }[];
-  myCreatorsDetail: { id: string; name: string; handle: string | null; avatarUrl: string | null }[];
+  myCreatorsDetail: { id: string; name: string; handle: string | null }[];
 }
 
 function giftCounts(recent: DashboardData["gifts"]["recent"]) {

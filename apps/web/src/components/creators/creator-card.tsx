@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Users, CalendarClock, Flame } from "lucide-react";
 import type { Platform } from "@prisma/client";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   PlatformBadge,
@@ -19,7 +19,6 @@ export interface CreatorListItem {
   gender: string | null;
   shopifyRegistered: boolean | null;
   niche: string | null;
-  avatarUrl: string | null;
   followers: number | null;
   engagementRate: number | null;
   platform: Platform | null;
@@ -94,7 +93,6 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
           <Avatar className="h-10 w-10 ring-1 ring-border">
-            <AvatarImage src={creator.avatarUrl ?? undefined} alt={creator.name} />
             <AvatarFallback>{initials(creator.name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0">

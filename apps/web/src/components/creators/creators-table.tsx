@@ -8,7 +8,7 @@ import {
   getSortedRowModel,
   type LegacyColumnDef,
 } from "@tanstack/react-table/legacy";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,7 +42,6 @@ function columns(): LegacyColumnDef<TableRow>[] {
         return (
           <Link href={`/creators/${c.id}`} className="flex items-center gap-2.5 font-medium hover:underline">
             <Avatar className="h-8 w-8">
-              <AvatarImage src={c.avatarUrl ?? undefined} alt={c.name} />
               <AvatarFallback>{initials(c.name)}</AvatarFallback>
             </Avatar>
             <span className="inline-flex flex-wrap items-center gap-1.5">

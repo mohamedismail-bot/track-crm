@@ -12,6 +12,7 @@ export interface CreatorFieldDef {
   required: boolean;
   order: number;
   options: string[];
+  isSystem: boolean;
 }
 
 /** Parse a CreatorField.options TEXT column as a string[] (JS values). */
@@ -68,6 +69,7 @@ export async function listCreatorFields(): Promise<CreatorFieldDef[]> {
     required: r.required,
     order: r.order,
     options: parseFieldOptions(r),
+    isSystem: r.isSystem,
   }));
 }
 
@@ -92,6 +94,8 @@ export interface ReferencePayload {
   creatorTypes: Awaited<ReturnType<typeof listCreatorTypes>>;
   fields: CreatorFieldDef[];
   genderOptions: string[];
+  nicheOptions: string[];
+  customFieldsEnabled: boolean;
   approvalEnabled: boolean;
 }
 
@@ -103,7 +107,15 @@ export async function getReferencePayload(): Promise<ReferencePayload> {
     getGenderOptions(),
     getSettings(),
   ]);
-  return { countries, creatorTypes, fields, genderOptions, approvalEnabled: settings.approvalEnabled };
+  return {
+    countries,
+    creatorTypes,
+    fields,
+    genderOptions,
+    nicheOptions: settings.nicheOptions,
+    customFieldsEnabled: settings.customFieldsEnabled,
+    approvalEnabled: settings.approvalEnabled,
+  };
 }
 
 /** Convenience: find a country by id with its dial code. */

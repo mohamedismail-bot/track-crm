@@ -39,6 +39,8 @@ interface SettingsData {
   passwordMinLength: number;
   passwordComplexity: boolean;
   genderOptions: string[];
+  nicheOptions: string[];
+  customFieldsEnabled: boolean;
   approvalEnabled: boolean;
   stages: { id: string; name: string; isCompleted: boolean }[];
 }
@@ -101,7 +103,17 @@ export default function SettingsPage() {
     if (!res.ok) return;
     const d = await res.json();
     setRefData({ countries: d.countries ?? [], creatorTypes: d.creatorTypes ?? [], fields: d.fields ?? [] });
-    setData((prev) => (prev ? { ...prev, genderOptions: d.genderOptions ?? prev.genderOptions, approvalEnabled: d.approvalEnabled ?? prev.approvalEnabled } : prev));
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            genderOptions: d.genderOptions ?? prev.genderOptions,
+            nicheOptions: d.nicheOptions ?? prev.nicheOptions,
+            customFieldsEnabled: d.customFieldsEnabled ?? prev.customFieldsEnabled,
+            approvalEnabled: d.approvalEnabled ?? prev.approvalEnabled,
+          }
+        : prev,
+    );
   }, []);
 
   const loadTeams = React.useCallback(async () => {
@@ -149,6 +161,8 @@ export default function SettingsPage() {
       fd.append("passwordMinLength", String(data.passwordMinLength));
       fd.append("passwordComplexity", data.passwordComplexity ? "true" : "false");
       fd.append("genderOptions", JSON.stringify(data.genderOptions));
+      fd.append("nicheOptions", JSON.stringify(data.nicheOptions));
+      fd.append("customFieldsEnabled", data.customFieldsEnabled ? "true" : "false");
       fd.append("approvalEnabled", data.approvalEnabled ? "true" : "false");
       if (logoFile) {
         fd.append("logo", logoFile);
@@ -526,11 +540,68 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <Toggle
+            label="Show admin-created custom fields in the creator form"
+            checked={data.customFieldsEnabled}
+            onChange={(v) => set("customFieldsEnabled", v)}
+          />
           <FieldList
             refData={refData}
             onChanged={loadReference}
             onToast={(title, variant) => toast({ title, variant })}
           />
+          <div className="space-y-2">
+            <div>
+              <Label>Niche options</Label>
+              <p className="text-xs text-muted-foreground">
+                Choices offered when adding or editing a creator&apos;s niche.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {data.nicheOptions.map((g, i) => (
+                <span
+                  key={`${g}-${i}`}
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-sm"
+                >
+                  {g}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${g}`}
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() =>
+                      set("nicheOptions", data.nicheOptions.filter((_, j) => j !== i))
+                    }
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                id="new-niche"
+                placeholder="Add an option (e.g. Fashion)"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const v = (e.target as HTMLInputElement).value.trim();
+                    if (v && !data.nicheOptions.includes(v)) set("nicheOptions", [...data.nicheOptions, v]);
+                    (e.target as HTMLInputElement).value = "";
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const input = document.getElementById("new-niche") as HTMLInputElement | null;
+                  const v = input?.value.trim() ?? "";
+                  if (v && !data.nicheOptions.includes(v)) set("nicheOptions", [...data.nicheOptions, v]);
+                  if (input) input.value = "";
+                }}
+              >
+                <Plus className="mr-1 h-4 w-4" /> Add
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

@@ -37,7 +37,6 @@ export interface CreateCreatorInput {
   followers?: string | number;
   engagementRate?: string | number;
   notes?: string;
-  avatarUrl?: string;
   customFields?: Record<string, string | number | boolean | null>;
   profiles: NewProfileInput[];
 }
@@ -101,7 +100,6 @@ export interface ValidationResult {
     followers: number | null;
     engagementRate: number | null;
     notes: string | null;
-    avatarUrl: string | null;
     customFields: Record<string, string | number | boolean | null>;
     phoneCountryRow: { id: string; dialCode: string; name: string } | null;
   };
@@ -121,7 +119,6 @@ const SYSTEM_REQUIRED_VALUE_KEY: Record<string, (d: ValidationResult["data"]) =>
   followers: (d) => d.followers !== null,
   engagementRate: (d) => d.engagementRate !== null,
   notes: (d) => !!d.notes,
-  avatarUrl: (d) => !!d.avatarUrl,
 };
 
 /**
@@ -234,7 +231,6 @@ export async function validateCreatorInput(
     followers: parseNumeric(input.followers),
     engagementRate: parseNumeric(input.engagementRate),
     notes: input.notes?.trim() || null,
-    avatarUrl: input.avatarUrl?.trim() || null,
     customFields: Object.keys(customFields).length ? customFields : {},
     phoneCountryRow,
   };
@@ -432,7 +428,6 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
         followers: validation.data.followers,
         engagementRate: validation.data.engagementRate,
         notes: validation.data.notes,
-        avatarUrl: validation.data.avatarUrl,
         customFields: Object.keys(validation.data.customFields).length ? validation.data.customFields : undefined,
         createdById: user.id,
         approvalStatus: pendingApproval ? "PENDING" : null,
@@ -657,7 +652,6 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
         gender: c.gender,
         shopifyRegistered: c.shopifyRegistered,
         niche: c.niche,
-        avatarUrl: c.avatarUrl,
         followers: c.followers,
         engagementRate: c.engagementRate,
         platform: c.primaryProfile?.platform ?? c.profiles[0]?.platform ?? null,

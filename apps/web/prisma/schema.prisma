@@ -261,7 +261,6 @@ model Creator {
   followers     Int?
   engagementRate Float?
   notes         String?
-  avatarUrl     String?
   createdById   String?
   deletedAt     DateTime?
   createdAt     DateTime @default(now())

@@ -57,7 +57,6 @@ export async function GET(req: NextRequest) {
     return {
       id: c.id,
       name: c.name,
-      avatarUrl: c.avatarUrl,
       platform: c.primaryProfile?.platform ?? c.profiles[0]?.platform ?? null,
       handle: c.primaryProfile?.handle ?? c.profiles[0]?.handle ?? null,
       followers: c.followers,

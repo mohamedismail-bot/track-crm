@@ -131,6 +131,25 @@ export async function PUT(req: NextRequest) {
     }
     entries[SETTING_KEYS.GENDER_OPTIONS] = JSON.stringify(opts.map((o) => String(o).trim()));
   }
+  if (body.nicheOptions !== undefined) {
+    let opts: unknown = body.nicheOptions;
+    if (typeof body.nicheOptions === "string") {
+      try {
+        opts = JSON.parse(body.nicheOptions);
+      } catch {
+        return jsonError("nicheOptions must be a JSON array of strings.", 400);
+      }
+    }
+    if (
+      !Array.isArray(opts) ||
+      opts.some((o) => typeof o !== "string" || !o.trim())
+    ) {
+      return jsonError("Niche options must be a JSON array of strings.", 400);
+    }
+    entries[SETTING_KEYS.NICHE_OPTIONS] = JSON.stringify(opts.map((o) => String(o).trim()));
+  }
+  if (body.customFieldsEnabled !== undefined)
+    entries[SETTING_KEYS.CUSTOM_FIELDS_ENABLED] = body.customFieldsEnabled ? "true" : "false";
   if (body.approvalEnabled !== undefined)
     entries[SETTING_KEYS.APPROVAL_REQUIRED] = body.approvalEnabled ? "true" : "false";
 

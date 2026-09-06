@@ -17,6 +17,8 @@ export interface WorkspaceSettings {
   passwordMinLength: number;
   passwordComplexity: boolean;
   genderOptions: string[];
+  nicheOptions: string[];
+  customFieldsEnabled: boolean;
   approvalEnabled: boolean;
 }
 
@@ -39,6 +41,8 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     passwordMinLength: safeInt(all[SETTING_KEYS.PASSWORD_MIN_LENGTH], 8),
     passwordComplexity: all[SETTING_KEYS.PASSWORD_COMPLEXITY] === "true",
     genderOptions: jsonArray(all[SETTING_KEYS.GENDER_OPTIONS]),
+    nicheOptions: jsonArray(all[SETTING_KEYS.NICHE_OPTIONS]),
+    customFieldsEnabled: all[SETTING_KEYS.CUSTOM_FIELDS_ENABLED] !== "false",
     approvalEnabled: all[SETTING_KEYS.APPROVAL_REQUIRED] === "true",
   };
 }

@@ -20,7 +20,7 @@ import {
   Store,
 } from "lucide-react";
 import Link from "next/link";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -141,7 +141,6 @@ interface CreatorDetail {
   followers: number | null;
   engagementRate: number | null;
   notes: string | null;
-  avatarUrl: string | null;
   createdAt: string;
   approvalStatus: ApprovalStatus | null;
   reviewComment: string | null;
@@ -298,7 +297,6 @@ export default function CreatorProfilePage() {
             followers: creator.followers,
             engagementRate: creator.engagementRate,
             notes: creator.notes ?? null,
-            avatarUrl: creator.avatarUrl ?? null,
             customFields: creator.customFields ?? {},
             profiles: creator.profiles.map((p) => ({
               platform: p.platform,
@@ -492,7 +490,6 @@ export default function CreatorProfilePage() {
       <Card>
         <CardContent className="flex flex-wrap items-start gap-4 pt-6">
           <Avatar className="h-16 w-16">
-            <AvatarImage src={creator.avatarUrl ?? undefined} alt={creator.name} />
             <AvatarFallback>{initials(creator.name)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">

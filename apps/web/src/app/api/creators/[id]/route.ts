@@ -162,7 +162,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       followers: body.followers !== undefined ? body.followers : creatorBefore.followers,
       engagementRate: body.engagementRate !== undefined ? body.engagementRate : creatorBefore.engagementRate,
       notes: body.notes !== undefined ? body.notes : creatorBefore.notes,
-      avatarUrl: body.avatarUrl !== undefined ? body.avatarUrl : creatorBefore.avatarUrl,
       customFields: body.customFields !== undefined ? body.customFields : (creatorBefore.customFields ?? {}),
     };
     const existingCustom = (creatorBefore.customFields ?? {}) as Record<string, unknown>;
@@ -217,7 +216,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           followers: validation.data.followers ?? undefined,
           engagementRate: validation.data.engagementRate ?? undefined,
           notes: validation.data.notes ?? undefined,
-          avatarUrl: validation.data.avatarUrl ?? undefined,
           customFields: Object.keys(validation.data.customFields).length ? validation.data.customFields : undefined,
           ...(nextApprovalStatus !== creatorBefore.approvalStatus
             ? {

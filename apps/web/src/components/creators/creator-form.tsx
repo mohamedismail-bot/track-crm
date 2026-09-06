@@ -60,12 +60,15 @@ interface ReferenceField {
   required: boolean;
   order: number;
   options: string[];
+  isSystem: boolean;
 }
 interface ReferencePayload {
   countries: ReferenceCountry[];
   creatorTypes: { id: string; name: string }[];
   fields: ReferenceField[];
   genderOptions: string[];
+  nicheOptions: string[];
+  customFieldsEnabled: boolean;
   approvalEnabled: boolean;
 }
 
@@ -89,7 +92,6 @@ export interface EditableCreatorInput {
   followers: number | null;
   engagementRate: number | null;
   notes: string | null;
-  avatarUrl: string | null;
   customFields: Record<string, string | number | boolean | null>;
   profiles: { platform: string; handle: string | null; isPrimary: boolean }[];
   countryValue: string | null;
@@ -133,7 +135,6 @@ export function CreatorFormDialog({
   const [followers, setFollowers] = React.useState("");
   const [engagementRate, setEngagementRate] = React.useState("");
   const [notes, setNotes] = React.useState("");
-  const [avatarUrl, setAvatarUrl] = React.useState("");
   const [custom, setCustom] = React.useState<Record<string, string | number | boolean | null>>(emptyCustom);
   const [profiles, setProfiles] = React.useState<ProfileRow[]>([]);
 
@@ -162,7 +163,6 @@ export function CreatorFormDialog({
       setFollowers(initial.followers?.toString() ?? "");
       setEngagementRate(initial.engagementRate?.toString() ?? "");
       setNotes(initial.notes ?? "");
-      setAvatarUrl(initial.avatarUrl ?? "");
       setCountryId(initial.countryId ?? "");
       setCityId(initial.cityId ?? "");
       setCreatorTypeId(initial.creatorTypeId ?? "");
@@ -195,7 +195,9 @@ export function CreatorFormDialog({
   const phonePreview = phoneDigits.replace(/\D/g, "") ? buildE164(dialOf(phoneCountryId), phoneDigits) : "";
 
   const requiredFields = (ref?.fields ?? []).filter((f) => f.required);
-  const customFields = (ref?.fields ?? []).filter((f) => f.id != null);
+  const customFields = (ref?.fields ?? []).filter((f) => f.id != null && !f.isSystem);
+  const customFieldsVisible = (ref?.customFieldsEnabled ?? true) && customFields.length > 0;
+  const nicheOptions = ref?.nicheOptions ?? [];
 
   React.useEffect(() => {
     if (!countryId) return;
@@ -339,7 +341,6 @@ export function CreatorFormDialog({
       followers: followers ? Number(followers) : undefined,
       engagementRate: engagementRate ? Number(engagementRate) : undefined,
       notes: notes.trim() || undefined,
-      avatarUrl: avatarUrl.trim() || undefined,
       customFields: custom,
       profiles: profiles
         .filter((p) => p.input.trim())
@@ -543,12 +544,28 @@ export function CreatorFormDialog({
               </Label>
             </div>
             <div className="space-y-1.5 sm:col-span-3">
-              <Label htmlFor="cf-niche">Niche</Label>
-              <Input id="cf-niche" value={niche} onChange={(e) => setNiche(e.target.value)} placeholder="Fashion, tech, food…" />
-            </div>
-            <div className="space-y-1.5 sm:col-span-3">
-              <Label htmlFor="cf-avatar">Avatar URL</Label>
-              <Input id="cf-avatar" type="url" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://…" />
+              <Label htmlFor="cf-niche" className="inline-flex items-center gap-1">
+                Niche{" "}
+                {requiredFields.some((f) => f.key === "niche") ? <span className="text-destructive">*</span> : null}
+              </Label>
+              <Select value={niche} onValueChange={setNiche}>
+                <SelectTrigger id="cf-niche">
+                  <SelectValue placeholder={nicheOptions.length ? "Select niche" : "No niche options yet"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {niche && !nicheOptions.includes(niche) ? <SelectItem value={niche}>{niche}</SelectItem> : null}
+                  {nicheOptions.map((o) => (
+                    <SelectItem key={o} value={o}>
+                      {o}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!nicheOptions.length ? (
+                <p className="text-xs text-muted-foreground">
+                  Add niche options in Workspace settings → Creator fields.
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5 sm:col-span-3">
               <Label htmlFor="cf-notes">Notes</Label>
@@ -557,7 +574,7 @@ export function CreatorFormDialog({
           </div>
 
           {/* Custom fields */}
-          {customFields.length ? (
+          {customFieldsVisible ? (
             <div className="space-y-3 rounded-lg border p-4">
               <Label className="text-sm font-semibold">Custom fields</Label>
               {customFields.map((f) => (
