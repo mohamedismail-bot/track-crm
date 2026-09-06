@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { hashPassword, isAdminRole } from "@/lib/auth";
+import { hashPassword } from "@/lib/auth";
+import { validatePassword } from "@/lib/settings";
 import { jsonError, requireApiUser } from "@/lib/api-utils";
-import type { SessionUser } from "@/lib/auth";
 
 export async function GET() {
   const user = await requireApiUser();
@@ -51,9 +51,9 @@ export async function POST(req: NextRequest) {
   const { displayName, email, phone, roleSlug, teamId, password } = body;
   if (!displayName?.trim()) return jsonError("Display name is required.", 400);
   if (!roleSlug || !teamId) return jsonError("Role and team are required.", 400);
-  if (!password || String(password).length < 8) {
-    return jsonError("Password must be at least 8 characters.", 400);
-  }
+  if (!password) return jsonError("Password is required.", 400);
+  const policyError = await validatePassword(String(password));
+  if (policyError) return jsonError(policyError, 400);
 
   const role = await prisma.role.findUnique({ where: { slug: roleSlug } });
   if (!role) return jsonError("Invalid role.", 400);
@@ -74,25 +74,4 @@ export async function POST(req: NextRequest) {
     },
   });
   return NextResponse.json({ id: created.id }, { status: 201 });
-}
-
-export async function ensureAdmin() {
-  const admins = await prisma.user.findMany({ where: { role: { is: { slug: "admin" } } } });
-  if (admins.length > 0) return;
-  const role = await prisma.role.findUnique({ where: { slug: "admin" } });
-  const team = await prisma.team.findFirst();
-  if (!role || !team) return;
-  await prisma.user.create({
-    data: {
-      displayName: "System Admin",
-      email: "admin@trackcrm.com",
-      passwordHash: await hashPassword("Admin@1234"),
-      roleId: role.id,
-      teamId: team.id,
-    },
-  });
-}
-
-export async function isAdmin(user: SessionUser) {
-  return isAdminRole(user.roleSlug);
 }

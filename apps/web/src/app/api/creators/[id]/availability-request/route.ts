@@ -14,6 +14,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json();
   const note: string | null = body.note ?? null;
 
+  if (!session.permissions.includes("request.create")) {
+    return jsonError("No permission to request availability.", 403);
+  }
+
   const creator = await prisma.creator.findUnique({
     where: { id, deletedAt: null },
     include: { ownerships: { include: { team: true } } },

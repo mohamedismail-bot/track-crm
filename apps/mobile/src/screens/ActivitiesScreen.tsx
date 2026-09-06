@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { api } from "../api";
 import { colors, formatDate } from "../theme";
-import { ACTIVITY_TYPES, type Activity, type Contact } from "@track-crm/shared";
+import { ACTIVITY_TYPES, type Activity, type Contact } from "@parishia-smart/shared";
 
 interface ActivityWithContact extends Activity {
   contactName: string;

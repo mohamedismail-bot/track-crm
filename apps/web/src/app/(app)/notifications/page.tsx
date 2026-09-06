@@ -28,6 +28,7 @@ export default function NotificationsPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/notifications");
+      if (!res.ok) return;
       setItems(await res.json());
     } finally {
       setLoading(false);
@@ -38,23 +39,29 @@ export default function NotificationsPage() {
     load();
   }, [load]);
 
+  const notifyUpdated = () => window.dispatchEvent(new Event("notifications-updated"));
+
   const markRead = async (id: string) => {
-    await fetch("/api/notifications", {
+    const res = await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     });
+    if (!res.ok) return toast({ title: "Could not update notification", variant: "destructive" });
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
+    notifyUpdated();
   };
 
   const markAllRead = async () => {
-    await fetch("/api/notifications", {
+    const res = await fetch("/api/notifications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ all: true }),
     });
+    if (!res.ok) return toast({ title: "Could not update notifications", variant: "destructive" });
     setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
     toast({ title: "All notifications marked read" });
+    notifyUpdated();
   };
 
   const unread = items.filter((n) => !n.readAt).length;

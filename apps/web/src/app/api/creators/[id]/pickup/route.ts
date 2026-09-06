@@ -14,6 +14,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const settings = await getSettings();
 
+  if (!session.permissions.includes("creator.create")) {
+    return jsonError("No permission to pick up creators.", 403);
+  }
+
   const creator = await prisma.creator.findUnique({
     where: { id, deletedAt: null },
     include: {

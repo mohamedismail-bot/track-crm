@@ -232,6 +232,11 @@ export default function CreatorProfilePage() {
   const [loading, setLoading] = React.useState(true);
   const [notFound, setNotFound] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
+  const [giftOpen, setGiftOpen] = React.useState(false);
+  const [giftEngagementId, setGiftEngagementId] = React.useState("");
+  const [giftProductName, setGiftProductName] = React.useState("");
+  const [giftDescription, setGiftDescription] = React.useState("");
+  const [giftBusy, setGiftBusy] = React.useState(false);
   const [editForm, setEditForm] = React.useState({
     name: "",
     niche: "",
@@ -318,6 +323,43 @@ export default function CreatorProfilePage() {
     if (!res.ok) return toast({ title: j.error ?? "Could not pick up", variant: "destructive" });
     toast({ title: "Creator picked up" });
     load();
+  };
+
+  const openGift = () => {
+    const defaultEngagement = creator?.engagements[0]?.id ?? "";
+    setGiftEngagementId(defaultEngagement);
+    setGiftProductName("");
+    setGiftDescription("");
+    setGiftOpen(true);
+  };
+
+  const requestGift = async () => {
+    if (!giftEngagementId || !giftProductName.trim()) {
+      return toast({ title: "Engagement and product name are required", variant: "destructive" });
+    }
+    setGiftBusy(true);
+    try {
+      const res = await fetch(`/api/gifts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          engagementId: giftEngagementId,
+          productName: giftProductName,
+          productDescription: giftDescription || undefined,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        return toast({ title: j.error ?? "Could not request gift", variant: "destructive" });
+      }
+      toast({ title: j.message ?? "Gift requested" });
+      setGiftOpen(false);
+      load();
+    } catch {
+      toast({ title: "Could not request gift", variant: "destructive" });
+    } finally {
+      setGiftBusy(false);
+    }
   };
 
   if (loading) return <CreatorPageSkeleton />;
@@ -445,14 +487,72 @@ export default function CreatorProfilePage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={giftOpen} onOpenChange={setGiftOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Request a gift</DialogTitle>
+            <DialogDescription>
+              Send a product to {creator.name}. A second gift in the same month requires manager approval.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <Label htmlFor="gift-engagement">Engagement</Label>
+              <select
+                id="gift-engagement"
+                className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                value={giftEngagementId}
+                onChange={(e) => setGiftEngagementId(e.target.value)}
+              >
+                {creator.engagements.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.title} · {e.team.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="gift-name">Product name</Label>
+              <Input
+                id="gift-name"
+                className="mt-1"
+                placeholder="e.g. Wireless headphones"
+                value={giftProductName}
+                onChange={(e) => setGiftProductName(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="gift-desc">Description (optional)</Label>
+              <Input
+                id="gift-desc"
+                className="mt-1"
+                placeholder="Color, model, size…"
+                value={giftDescription}
+                onChange={(e) => setGiftDescription(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGiftOpen(false)}>Cancel</Button>
+            <Button onClick={requestGift} disabled={giftBusy}>
+              {giftBusy ? "Requesting…" : "Request gift"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Tabs defaultValue="activity">
             <TabsList className="mb-4">
               <TabsTrigger value="activity">Activity</TabsTrigger>
-              <TabsTrigger value="engagements">Engagements</TabsTrigger>
-              <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
-              <TabsTrigger value="gifts">Gifts</TabsTrigger>
+              {creator.canViewFull ? (
+                <>
+                  <TabsTrigger value="engagements">Engagements</TabsTrigger>
+                  <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
+                  <TabsTrigger value="gifts">Gifts</TabsTrigger>
+                </>
+              ) : null}
               {!isOtherTeam ? <TabsTrigger value="details">Details</TabsTrigger> : null}
             </TabsList>
 
@@ -645,10 +745,14 @@ export default function CreatorProfilePage() {
                 <CardTitle className="text-sm">Gift a creator</CardTitle>
               </CardHeader>
               <CardContent>
-                <Button asChild variant="outline" className="w-full" size="sm">
-                  <Link href={`/creators/${id}`}>
-                    <PackagePlus className="mr-1 h-4 w-4" /> Request gift
-                  </Link>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  onClick={openGift}
+                  disabled={creator.engagements.length === 0}
+                >
+                  <PackagePlus className="mr-1 h-4 w-4" /> Request gift
                 </Button>
                 <p className="mt-2 text-xs text-muted-foreground">
                   Subject to the one-per-month rule. Requests that need an exception go to your team manager.

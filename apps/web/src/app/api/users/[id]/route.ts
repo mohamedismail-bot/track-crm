@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/auth";
+import { validatePassword } from "@/lib/settings";
 import { jsonError, requireApiUser } from "@/lib/api-utils";
 import type { Prisma } from "@prisma/client";
 
@@ -32,7 +33,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.roleId = role.id;
   }
   if (body.password !== undefined) {
-    if (String(body.password).length < 8) return jsonError("Password must be at least 8 characters.", 400);
+    if (!body.password) return jsonError("Password cannot be empty.", 400);
+    const policyError = await validatePassword(String(body.password));
+    if (policyError) return jsonError(policyError, 400);
     data.passwordHash = await hashPassword(String(body.password));
   }
   if (body.archived !== undefined) data.archivedAt = body.archived ? new Date() : null;

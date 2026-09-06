@@ -1,5 +1,5 @@
 {
-  "name": "track-crm",
+  "name": "parishia-smart",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@12.3.4",
@@ -10,7 +10,7 @@
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
-    "db:generate": "pnpm --filter @track-crm/api db:generate",
-    "db:migrate": "pnpm --filter @track-crm/api db:migrate"
+    "db:generate": "pnpm --filter @parishia-smart/api db:generate",
+    "db:migrate": "pnpm --filter @parishia-smart/api db:migrate"
   }
 }

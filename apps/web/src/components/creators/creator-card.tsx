@@ -27,6 +27,7 @@ export interface CreatorListItem {
   teams: { id: string; name: string }[];
   stage: { id: string; name: string } | null;
   currentEngagementId: string | null;
+  canMove: boolean;
   completedAt: string | null;
   nextDeliverable: { id: string; title: string; dueDate: string } | null;
   lastActivityAt: string | null;

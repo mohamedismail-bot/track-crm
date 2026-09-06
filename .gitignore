@@ -32,3 +32,5 @@ npm-debug.log*
 
 # Prisma
 apps/api/prisma/*.db
+.vercel
+.env*

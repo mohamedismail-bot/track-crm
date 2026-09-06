@@ -131,10 +131,9 @@ export function CreatorsTable({ creators }: { creators: CreatorListItem[] }) {
     columns: columns(),
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    state: {
+    initialState: {
       sorting: [{ id: "lastActivityAt", desc: true }],
     },
-    onSortingChange: () => {},
   });
 
   return (

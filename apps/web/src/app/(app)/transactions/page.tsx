@@ -31,8 +31,12 @@ export default function TransactionsPage() {
 
   React.useEffect(() => {
     fetch("/api/transactions")
-      .then((r) => r.json())
+      .then((r) => {
+        if (r.ok) return r.json();
+        throw new Error(`Request failed: ${r.status}`);
+      })
       .then(setLogs)
+      .catch(() => setLogs([]))
       .finally(() => setLoading(false));
   }, []);
 

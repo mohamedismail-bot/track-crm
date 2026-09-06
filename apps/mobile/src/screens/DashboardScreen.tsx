@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { api } from "../api";
 import { colors, formatDate, formatMoney } from "../theme";
-import type { DashboardStats } from "@track-crm/shared";
+import type { DashboardStats } from "@parishia-smart/shared";
 
 const EMPTY: DashboardStats = {
   totalContacts: 0,

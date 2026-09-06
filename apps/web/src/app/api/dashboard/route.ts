@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/api-utils";
 import type { SessionUser } from "@/lib/auth";
-import { addDays, startOfMonth, endOfMonth } from "date-fns";
+import { addDays, startOfMonth, endOfMonth, subDays } from "date-fns";
 import { DeliverableStatus, GiftStatus } from "@prisma/client";
 
 export async function GET() {
@@ -10,8 +10,16 @@ export async function GET() {
   if (user instanceof NextResponse) return user;
   const session = user as SessionUser;
 
-  const teamWhere = session.roleSlug === "admin" ? {} : { teamId: session.teamId };
+  const isWarehouse = session.roleSlug === "warehouse";
+  const isAdmin = session.roleSlug === "admin";
+  const teamWhere = isAdmin ? {} : { teamId: session.teamId };
+  // Warehouse (and admin) see gift data across all teams; everyone else is
+  // scoped to their own team.
+  const giftTeamWhere = isWarehouse || isAdmin ? {} : { teamId: session.teamId };
+
   const now = new Date();
+  const monthStart = startOfMonth(now);
+  const monthEnd = endOfMonth(now);
 
   const [
     totalCreators,
@@ -19,12 +27,18 @@ export async function GET() {
     overdueDeliverables,
     upcomingDeliverables,
     recentEngagements,
-    giftsThisMonth,
-    exceptionsPending,
+    giftsRequestedThisMonth,
+    giftsPendingApproval,
+    giftsPendingExceptions,
+    giftsQueued,
+    giftsDispatchedThisMonth,
+    giftsDeliveredThisMonth,
     pipelineCounts,
     ownedByMe,
   ] = await Promise.all([
-    prisma.creator.count({ where: { deletedAt: null } }),
+    prisma.creator.count({
+      where: { deletedAt: null, ...(isAdmin ? {} : { ownerships: { some: { teamId: session.teamId } } }) },
+    }),
     prisma.creatorOwnership.count({ where: { userId: session.id } }),
     prisma.deliverable.findMany({
       where: {
@@ -54,13 +68,33 @@ export async function GET() {
     }),
     prisma.gift.count({
       where: {
-        engagement: teamWhere,
-        requestedAt: { gte: startOfMonth(now), lte: endOfMonth(now) },
+        engagement: giftTeamWhere,
+        requestedAt: { gte: monthStart, lte: monthEnd },
         status: { not: GiftStatus.REJECTED },
       },
     }),
     prisma.gift.count({
-      where: { status: GiftStatus.REQUESTED, engagement: teamWhere },
+      where: { status: GiftStatus.REQUESTED, engagement: giftTeamWhere },
+    }),
+    prisma.gift.count({
+      where: { status: GiftStatus.REQUESTED, isException: true, engagement: giftTeamWhere },
+    }),
+    prisma.gift.count({
+      where: { status: GiftStatus.APPROVED_QUEUED, engagement: giftTeamWhere },
+    }),
+    prisma.gift.count({
+      where: {
+        status: GiftStatus.DISPATCHED,
+        dispatchedAt: { gte: monthStart, lte: monthEnd },
+        engagement: giftTeamWhere,
+      },
+    }),
+    prisma.gift.count({
+      where: {
+        status: GiftStatus.DELIVERED,
+        deliveredAt: { gte: monthStart, lte: monthEnd },
+        engagement: giftTeamWhere,
+      },
     }),
     prisma.engagement.groupBy({
       by: ["stageId"],
@@ -81,11 +115,23 @@ export async function GET() {
     count: c._count._all,
   }));
 
-  const maps = await prisma.creatorOwnership.groupBy({
-    by: ["userId"],
-    where: teamWhere,
-    _count: { _all: true },
-  });
+  const [maps, recentGifts] = await Promise.all([
+    prisma.creatorOwnership.groupBy({
+      by: ["userId"],
+      where: teamWhere,
+      _count: { _all: true },
+    }),
+    prisma.gift.findMany({
+      where: {
+        engagement: giftTeamWhere,
+        requestedAt: { gte: subDays(now, 90) },
+      },
+      include: { engagement: { include: { creator: true, team: true } } },
+      orderBy: { requestedAt: "desc" },
+      take: 100,
+    }),
+  ]);
+
   const userSummaries = await prisma.user.findMany({
     where: { id: { in: maps.map((m) => m.userId) } },
     select: { id: true, displayName: true },
@@ -105,7 +151,32 @@ export async function GET() {
     avatarUrl: o.creator.avatarUrl,
   }));
 
+  // Top gifted creators (last 90 days), with exception requests flagged.
+  const giftedCounts = new Map<string, { creatorId: string; name: string; count: number }>();
+  for (const g of recentGifts) {
+    const cid = g.engagement.creatorId;
+    const cur = giftedCounts.get(cid);
+    if (cur) {
+      cur.count += 1;
+    } else {
+      giftedCounts.set(cid, {
+        creatorId: cid,
+        name: g.engagement.creator.name,
+        count: 1,
+      });
+    }
+  }
+  const topGiftedCreators = [...giftedCounts.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
   return NextResponse.json({
+    role: {
+      roleSlug: session.roleSlug,
+      isWarehouse,
+      canApprove: session.permissions.includes("gift.approve"),
+      canFulfill: session.permissions.includes("gift.fulfill"),
+    },
     totalCreators,
     myCreators,
     overdueDeliverables: overdueDeliverables.map((d) => ({
@@ -131,8 +202,25 @@ export async function GET() {
       teamName: e.team.name,
       updatedAt: e.updatedAt,
     })),
-    giftsThisMonth,
-    exceptionsPending,
+    gifts: {
+      requestedThisMonth: giftsRequestedThisMonth,
+      pendingApproval: giftsPendingApproval,
+      pendingExceptions: giftsPendingExceptions,
+      queuedForDispatch: giftsQueued,
+      dispatchedThisMonth: giftsDispatchedThisMonth,
+      deliveredThisMonth: giftsDeliveredThisMonth,
+      topGiftedCreators,
+      recent: recentGifts.map((g) => ({
+        id: g.id,
+        productName: g.productName,
+        status: g.status,
+        isException: g.isException,
+        requestedAt: g.requestedAt,
+        creatorId: g.engagement.creatorId,
+        creatorName: g.engagement.creator.name,
+        teamName: g.engagement.team.name,
+      })),
+    },
     pipeline,
     leaderboard,
     myCreatorsDetail,

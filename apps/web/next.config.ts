@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@track-crm/shared"],
+  transpilePackages: ["@parishia-smart/shared"],
 };
 
 export default nextConfig;

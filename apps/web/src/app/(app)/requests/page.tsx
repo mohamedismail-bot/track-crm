@@ -31,6 +31,7 @@ export default function RequestsPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/availability-requests");
+      if (!res.ok) return;
       setItems(await res.json());
     } finally {
       setLoading(false);

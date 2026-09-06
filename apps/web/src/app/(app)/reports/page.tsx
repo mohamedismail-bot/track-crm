@@ -29,8 +29,12 @@ export default function ReportsPage() {
 
   React.useEffect(() => {
     fetch("/api/dashboard")
-      .then((r) => r.json())
+      .then((r) => {
+        if (r.ok) return r.json();
+        throw new Error(`Request failed: ${r.status}`);
+      })
       .then(setDashboard)
+      .catch(() => setDashboard(null))
       .finally(() => setLoading(false));
   }, []);
 

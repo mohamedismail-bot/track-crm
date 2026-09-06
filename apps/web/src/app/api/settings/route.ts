@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { getSettings, setSettingsMany } from "@/lib/settings";
 import { BRAND_COLORS, SETTING_KEYS } from "@/lib/constants";
 import { jsonError, requireApiUser } from "@/lib/api-utils";
+import { storeUpload } from "@/lib/blob";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 
 export async function GET() {
@@ -68,11 +66,8 @@ export async function PUT(req: NextRequest) {
     if (logoFile.size > MAX_LOGO_BYTES) {
       return jsonError("Logo must be smaller than 5 MB.", 400);
     }
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
-    const filename = `logo-${Date.now()}-${logoFile.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-    const buffer = Buffer.from(await logoFile.arrayBuffer());
-    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
-    entries[SETTING_KEYS.COMPANY_LOGO] = `/uploads/${filename}`;
+    const stored = await storeUpload(logoFile, "logos");
+    entries[SETTING_KEYS.COMPANY_LOGO] = stored.url;
   }
   if (body.multiTeam !== undefined) entries[SETTING_KEYS.MULTI_TEAM] = body.multiTeam ? "true" : "false";
   if (body.multiOwner !== undefined) entries[SETTING_KEYS.MULTI_OWNER] = body.multiOwner ? "true" : "false";
@@ -84,17 +79,30 @@ export async function PUT(req: NextRequest) {
   if (body.inactivityCompanyDays !== undefined) {
     const n = Number(body.inactivityCompanyDays);
     if (!Number.isFinite(n) || n < 1) return jsonError("Invalid inactivity threshold (company).", 400);
-    if (n <= Number(entries[SETTING_KEYS.INACTIVITY_SAME_TEAM] ?? 0)) {
+    entries[SETTING_KEYS.INACTIVITY_COMPANY] = String(Math.round(n));
+  }
+  // Validate cross-field: company threshold must be strictly longer than the
+  // same-team threshold, regardless of whether both were sent together.
+  if (entries[SETTING_KEYS.INACTIVITY_COMPANY] || entries[SETTING_KEYS.INACTIVITY_SAME_TEAM]) {
+    const current = await getSettings();
+    const company = Number(entries[SETTING_KEYS.INACTIVITY_COMPANY]) || current.inactivityCompanyDays;
+    const sameTeam = Number(entries[SETTING_KEYS.INACTIVITY_SAME_TEAM]) || current.inactivitySameTeamDays;
+    if (company <= sameTeam) {
       return jsonError("Company threshold must be longer than the same-team threshold.", 400);
     }
-    entries[SETTING_KEYS.INACTIVITY_COMPANY] = String(Math.round(n));
   }
   if (body.giftMonthlyCapEnabled !== undefined)
     entries[SETTING_KEYS.GIFT_MONTHLY_CAP] = body.giftMonthlyCapEnabled ? "true" : "false";
   if (body.giftRequirePreviousDeliverable !== undefined)
     entries[SETTING_KEYS.GIFT_REQUIRE_PREV_DELIVERABLE] = body.giftRequirePreviousDeliverable ? "true" : "false";
-  if (body.giftMinStageId !== undefined)
-    entries[SETTING_KEYS.GIFT_MIN_STAGE_ID] = String(body.giftMinStageId ?? "");
+  if (body.giftMinStageId !== undefined) {
+    const stageId = String(body.giftMinStageId ?? "");
+    if (stageId && stageId !== "none") {
+      const stage = await prisma.stage.findUnique({ where: { id: stageId } });
+      if (!stage) return jsonError("Invalid minimum gift stage.", 400);
+    }
+    entries[SETTING_KEYS.GIFT_MIN_STAGE_ID] = stageId === "none" ? "" : stageId;
+  }
   if (body.exportEnabledRoles !== undefined)
     entries[SETTING_KEYS.EXPORT_ENABLED_ROLES] = JSON.stringify(body.exportEnabledRoles ?? []);
   if (body.passwordMinLength !== undefined) {

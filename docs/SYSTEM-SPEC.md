@@ -1,6 +1,6 @@
-# Influencer Track CRM — System Specification
+# Parishia Smart — System Specification
 
-Hand-off document for building the Influencer Outreach, Tracking, and Gifting CRM.
+Hand-off document for building the Creator Outreach, Tracking, and Gifting workspace.
 
 See `CONTEXT.md` for domain glossary and relationship rules.
 

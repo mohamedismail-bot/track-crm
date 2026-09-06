@@ -41,11 +41,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireApiUser();
   if (user instanceof NextResponse) return user;
+  const session = user as SessionUser;
   const { id } = await params;
   const gift = await prisma.gift.findUnique({
     where: { id },
     include: { engagement: { include: { creator: true, team: true } }, requestedBy: true, approvedBy: true },
   });
   if (!gift) return jsonError("Gift not found.", 404);
+  // Warehouse/fullfillment users serve all teams; everyone else only their own team.
+  const isWarehouse = session.permissions.includes("gift.fulfill");
+  if (!isWarehouse && session.roleSlug !== "admin" && gift.engagement.teamId !== session.teamId) {
+    return jsonError("Gift not found.", 404);
+  }
   return NextResponse.json(gift);
 }

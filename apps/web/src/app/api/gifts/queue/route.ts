@@ -15,11 +15,16 @@ export async function GET(req: NextRequest) {
   const exception = params.get("exception");
   const pendingOnly = params.get("scope") === "manager";
 
+  // Warehouse/fullfillment users see gifts across all teams; everyone else is
+  // scoped to their own team unless they explicitly filter by team.
+  const isWarehouse = session.permissions.includes("gift.fulfill");
+  const scopeToOwnTeam = !isWarehouse && session.roleSlug !== "admin" && !team;
+
   const where: Prisma.GiftWhereInput = {
     ...(status ? { status: status as GiftStatus } : {}),
     ...(exception === "1" ? { isException: true } : {}),
     ...(team ? { engagement: { teamId: team } } : {}),
-    ...(session.roleSlug !== "admin" && !team ? { engagement: { teamId: session.teamId } } : {}),
+    ...(scopeToOwnTeam ? { engagement: { teamId: session.teamId } } : {}),
     ...(pendingOnly ? { status: { in: [GiftStatus.REQUESTED] } } : {}),
   };
 

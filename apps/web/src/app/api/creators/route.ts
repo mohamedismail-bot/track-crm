@@ -17,6 +17,8 @@ export async function GET(req: NextRequest) {
     owner: params.get("owner") ?? "",
     q: params.get("q") ?? "",
     pool: params.get("pool") ?? "",
+    overdue: params.get("overdue") === "1",
+    upcoming: params.get("upcoming") === "1",
   });
 
   return NextResponse.json(items);

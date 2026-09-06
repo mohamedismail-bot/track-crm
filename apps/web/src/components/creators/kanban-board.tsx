@@ -17,11 +17,9 @@ export interface KanbanStage {
 export function KanbanBoard({
   creators,
   stages,
-  canMove,
 }: {
   creators: CreatorListItem[];
   stages: KanbanStage[];
-  canMove: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -48,6 +46,24 @@ export function KanbanBoard({
   const unassigned = displayed.filter((c) => !c.stage);
   const completedStages = stages.filter((s) => s.isCompleted);
   const standardStages = stages.filter((s) => !s.isCompleted);
+  const stageIds = new Set(stages.map((s) => s.id));
+  // Creators whose stage isn't in this team's pipeline, or that have no open
+  // engagement to move, land in a read-only "Other stages" bucket.
+  const otherMoved = displayed.filter((c) => {
+    if (!c.stage) return false;
+    if (c.stage.id === "unassigned") return false;
+    return !stageIds.has(c.stage.id) || !c.currentEngagementId;
+  });
+  const otherStageNames = [...new Set(otherMoved.map((c) => c.stage?.name).filter(Boolean))];
+
+  const revertOverride = (creatorId: string) => {
+    setStageOverrides((prev) => {
+      if (!(creatorId in prev)) return prev;
+      const next = { ...prev };
+      delete next[creatorId];
+      return next;
+    });
+  };
 
   const onDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
@@ -57,7 +73,7 @@ export function KanbanBoard({
     if (!creator) return;
     if (creator.stage?.id === targetStageId) return;
 
-    if (!canMove) {
+    if (!creator.canMove) {
       toast({
         title: "Cannot move stages",
         description: "Only the assigned owner or a team manager can move stages.",
@@ -70,6 +86,16 @@ export function KanbanBoard({
       toast({
         title: "No open engagement",
         description: `${creator.name} has no engagement to move.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // An engagement always lives at some stage; moving to "no stage" is invalid.
+    if (!targetStageId) {
+      toast({
+        title: "Cannot remove stage",
+        description: "An engagement always belongs to a stage.",
         variant: "destructive",
       });
       return;
@@ -90,12 +116,14 @@ export function KanbanBoard({
       });
       const data = await res.json();
       if (!res.ok) {
+        revertOverride(draggableId);
         toast({ title: data.error ?? "Could not move stage", variant: "destructive" });
         return;
       }
       toast({ title: "Moved", description: `${creator.name} → ${data.stageName}` });
       router.refresh();
     } catch {
+      revertOverride(draggableId);
       toast({ title: "Could not move stage", variant: "destructive" });
     } finally {
       setBusy(false);
@@ -103,7 +131,7 @@ export function KanbanBoard({
   };
 
   const renderCard = (c: CreatorListItem, index: number) => (
-    <Draggable key={c.id} draggableId={c.id} index={index} isDragDisabled={!canMove || busy}>
+    <Draggable key={c.id} draggableId={c.id} index={index} isDragDisabled={!c.canMove || busy}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
@@ -183,6 +211,28 @@ export function KanbanBoard({
             </div>
           )}
         </Droppable>
+        {otherMoved.length > 0 && (
+          <div className="w-64 shrink-0 rounded-lg border p-2 bg-muted/40">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Other stages
+              </span>
+              <Badge variant="secondary" className="px-1.5">
+                {otherMoved.length}
+              </Badge>
+            </div>
+            {otherStageNames.length > 0 && (
+              <p className="mb-2 px-1 text-[11px] text-muted-foreground">
+                {otherStageNames.join(" · ")}
+              </p>
+            )}
+            {otherMoved.map((c) => (
+              <div key={c.id} className="mb-2">
+                <CreatorCard creator={c} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </DragDropContext>
   );

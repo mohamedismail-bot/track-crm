@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { prisma } from '../index.js'
-import { CONTACT_STATUSES } from '@track-crm/shared'
+import { CONTACT_STATUSES } from '@parishia-smart/shared'
 
 const contactSchema = z.object({
   name: z.string().min(1),

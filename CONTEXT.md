@@ -1,4 +1,4 @@
-# Influencer Track CRM
+# Parishia Smart
 
 A system for tracking and managing outreach to influencers/content creators on behalf of a company: who owns each creator, which stage they are in, what content was agreed, and how product gifting is controlled.
 
@@ -81,6 +81,14 @@ A product item sent to a **Creator** as part of an **Engagement**. A **Creator**
 **Workspace Settings**:
 Configurable workspace-level rules controlled by the **Admin**, including the brand identity (workspace **name**, an attached/uploaded **logo file** — not a URL — and an **accent color** from a preset palette applied across the app and login screen), dynamic **Team** management (create/rename/delete), the **Ownership Policy**, the **Inactivity Threshold**, the one-**Gift**-per-month limit, the minimum **Stage** for sending a **Gift**, and the requirement that an approved **Deliverable** with a recorded posted video/link is needed before the next **Gift** may be requested.
 
+**Dashboard**:
+The role-aware landing page for a **User** after login. Every numbered insight is an interactive element: clicking a stat navigates to the relevant page pre-filtered via URL parameters (e.g., **Creators** filtered by **Stage**, **Owner**, or **Availability Pool**), and an inline "Show details" toggle expands the top records without leaving the page. **Warehouse** users see a fulfillment-oriented view focused on gifting throughput; all other roles see creator workload, pipeline, and gifting summaries (including gifts requested, pending approvals, exception requests, and top gifted creators for the last 90 days).
+_Avoid_: static, non-clickable metrics
+
+**Deep Link**:
+A URL that opens a list page with filters applied, used by the **Dashboard** to let a user drill into an insight in one click. **Creators** respects `stage`, `owner`, `pool`, `q`, `team`, `overdue=1`, and `upcoming=1`; **Gifting** respects `tab=pending|warehouse|history`. Filters initialize from the URL so the link produces the matching list.
+_Avoid_: query string that the page ignores
+
 ## Relationships
 
 - A **Creator** has one **Primary Platform Profile** and zero or more additional **Platform Profiles**
@@ -88,6 +96,8 @@ Configurable workspace-level rules controlled by the **Admin**, including the br
 - A **Platform Handle** is unique per platform across all **Creators**
 - A **Creator** is assigned to one or more **Owners** and belongs to one or more **Teams**, governed by the **Ownership Policy**
 - A **Team** has one or more system users
+- A **Dashboard** is role-aware: **Warehouse** sees gifting throughput; other roles see creator workload plus gifting
+- A **Dashboard** insight is a **Deep Link**-driven interaction: click to navigate to a pre-filtered list, or expand inline details
 
 ## Example dialogue
 

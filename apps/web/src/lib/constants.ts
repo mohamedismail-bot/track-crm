@@ -276,7 +276,7 @@ export const BRAND_COLORS: Record<string, BrandColor> = {
 };
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
-  [SETTING_KEYS.WORKSPACE_NAME]: "Track CRM",
+  [SETTING_KEYS.WORKSPACE_NAME]: "Parishia Smart",
   [SETTING_KEYS.COMPANY_LOGO]: "",
   [SETTING_KEYS.PRIMARY_COLOR]: DEFAULT_PRIMARY_COLOR,
   [SETTING_KEYS.MULTI_TEAM]: "false",

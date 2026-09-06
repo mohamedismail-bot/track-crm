@@ -13,7 +13,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json();
   const action: string = body.action;
 
-  const del = await prisma.deliverable.findUnique({ where: { id } });
+  const del = await prisma.deliverable.findUnique({
+    where: { id },
+    include: { engagement: { include: { creator: { include: { ownerships: true } } } } },
+  });
   if (!del) return jsonError("Deliverable not found.", 404);
 
   if (action === "submit") {
@@ -26,6 +29,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (action === "resubmit") {
+    if (!session.permissions.includes("deliverable.submit")) {
+      return jsonError("No permission to submit deliverables.", 403);
+    }
+    if (del.engagement.teamId !== session.teamId) {
+      return jsonError("Not your team's deliverable.", 403);
+    }
+    const owns = del.engagement.creator.ownerships.some((o) => o.userId === session.id);
+    if (!owns && session.roleSlug !== "team-manager" && session.roleSlug !== "admin") {
+      return jsonError("Only the assigned owner or team manager can resubmit a deliverable.", 403);
+    }
     // Revision requested -> back to pending before a fresh submit.
     await prisma.deliverable.update({
       where: { id },

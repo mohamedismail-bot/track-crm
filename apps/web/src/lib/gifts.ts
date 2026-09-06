@@ -96,15 +96,8 @@ export async function canRequestGift(user: SessionUser, engagementId: string) {
     }
   }
 
-  // Monthly cap
-  if (settings.giftMonthlyCapEnabled) {
-    const count = await countCreatorGiftsThisMonth(engagement.creatorId);
-    if (count >= 1) {
-      return { ok: false as const, needsException: true as const, message: "A gift was already requested this month." };
-    }
-  }
-
-  // Hard stop lock
+  // Hard stop lock (no override, evaluated before the monthly cap so an
+  // exception can never bypass a still-unfulfilled previous gift).
   if (settings.giftRequirePreviousDeliverable) {
     const lock = await getLastGiftLockingDeliverable(engagement.creatorId);
     if (lock.blockedBy) {
@@ -113,6 +106,14 @@ export async function canRequestGift(user: SessionUser, engagementId: string) {
         blocked: true as const,
         message: `Previous gift "${lock.blockedBy.gift}" requires the following deliverable(s) to be received first: ${lock.blockedBy.deliverables.join(", ")}`,
       };
+    }
+  }
+
+  // Monthly cap
+  if (settings.giftMonthlyCapEnabled) {
+    const count = await countCreatorGiftsThisMonth(engagement.creatorId);
+    if (count >= 1) {
+      return { ok: false as const, needsException: true as const, message: "A gift was already requested this month." };
     }
   }
 
@@ -133,7 +134,11 @@ export async function requestGift(
 > {
   const check = await canRequestGift(user, engagementId);
   if (check.ok === false) {
-    return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked };
+    // A second gift in the same month needs manager approval: it is NOT a dead
+    // end — proceed in exception mode so the gift gets created as REQUESTED.
+    if (check.blocked || !check.needsException) {
+      return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked };
+    }
   }
 
   // Recompute exception: a second gift in the same month needs manager approval.

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Package,
   Check,
@@ -48,6 +49,9 @@ interface QueueGift {
 }
 
 export default function GiftingPage() {
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const initialTab = ["pending", "warehouse", "history"].includes(tabFromUrl ?? "") ? tabFromUrl! : "pending";
   const [gifts, setGifts] = React.useState<QueueGift[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [me, setMe] = React.useState<{
@@ -59,6 +63,7 @@ export default function GiftingPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/gifts/queue${scope ? `?scope=${scope}` : ""}`);
+      if (!res.ok) return;
       setGifts(await res.json());
     } finally {
       setLoading(false);
@@ -111,7 +116,7 @@ export default function GiftingPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="pending">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="pending">
             Pending approval

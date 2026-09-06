@@ -9,7 +9,7 @@ import { PERMISSIONS } from "./constants";
 const SECRET = new TextEncoder().encode(
   process.env.AUTH_SECRET ?? "dev-only-change-me-0123456789abcdef0123456789abcdef",
 );
-const SESSION_COOKIE = "track_crm_session";
+const SESSION_COOKIE = "parishia_smart_session";
 const SESSION_MS = 1000 * 60 * 60 * 24 * 7;
 
 export interface SessionUser {

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { prisma } from '../index.js'
-import { ACTIVITY_TYPES } from '@track-crm/shared'
+import { ACTIVITY_TYPES } from '@parishia-smart/shared'
 
 const activitySchema = z.object({
   contactId: z.string().min(1),

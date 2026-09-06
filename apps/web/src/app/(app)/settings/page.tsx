@@ -481,8 +481,8 @@ export default function SettingsPage() {
           <div className="space-y-1.5">
             <Label>Minimum stage for sending a gift</Label>
             <Select
-              value={data.giftMinStageId ?? ""}
-              onValueChange={(v) => set("giftMinStageId", v || null)}
+              value={data.giftMinStageId ?? "none"}
+              onValueChange={(v) => set("giftMinStageId", v === "none" ? null : v)}
             >
               <SelectTrigger className="w-full sm:max-w-xs">
                 <SelectValue placeholder="No minimum stage" />

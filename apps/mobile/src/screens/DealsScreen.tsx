@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { api } from "../api";
 import { colors, formatDate, formatMoney } from "../theme";
-import { DEAL_STAGES, type Contact, type Deal } from "@track-crm/shared";
+import { DEAL_STAGES, type Contact, type Deal } from "@parishia-smart/shared";
 
 interface DealWithContact extends Deal {
   contactName: string;

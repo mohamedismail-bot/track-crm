@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Track CRM",
-  description: "Influencer outreach, tracking, and gifting CRM",
+  title: "Parishia Smart",
+  description: "Creator outreach, tracking, and gifting workspace",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

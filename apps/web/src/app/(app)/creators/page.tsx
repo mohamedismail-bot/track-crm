@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { Grid2X2, Table2, KanbanSquare, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,20 +27,26 @@ interface FilterOption {
 }
 
 export default function CreatorsPage() {
+  const params = useSearchParams();
   const [view, setView] = React.useState<View>("card");
   const [creators, setCreators] = React.useState<CreatorListItem[]>([]);
   const [stages, setStages] = React.useState<KanbanStage[]>([]);
-  const [teams, setTeams] = React.useState<FilterOption[]>([{ value: "", label: "All teams" }]);
+  const [teams, setTeams] = React.useState<FilterOption[]>([
+    { value: "all-team", label: "All teams" },
+    { value: "unassigned", label: "Unassigned" },
+  ]);
   const [loading, setLoading] = React.useState(true);
   const [formOpen, setFormOpen] = React.useState(false);
   const [filters, setFilters] = React.useState({
     q: "",
-    team: "",
-    stage: "",
+    team: "all-team",
+    stage: "all-stage",
     platform: "",
-    pool: "",
+    pool: "all-pool",
+    owner: "",
+    overdue: params.get("overdue") === "1",
+    upcoming: params.get("upcoming") === "1",
   });
-  const [canMove, setCanMove] = React.useState(false);
   const [me, setMe] = React.useState<{
     id: string;
     teamId: string;
@@ -50,12 +57,38 @@ export default function CreatorsPage() {
   React.useEffect(() => {
     fetch("/api/me")
       .then((r) => r.json())
-      .then((m) => {
-        setMe(m);
-        setCanMove(!!m.permissions?.includes("creator.moveStage"));
-      })
+      .then(setMe)
       .catch(() => {});
   }, []);
+
+  // Seed filters from URL params (deep links from the dashboard).
+  React.useEffect(() => {
+    const stage = params.get("stage");
+    const pool = params.get("pool");
+    const q = params.get("q");
+    const owner = params.get("owner");
+    const overdue = params.get("overdue") === "1";
+    const upcoming = params.get("upcoming") === "1";
+    const set = (patch: Partial<typeof filters>) => setFilters((f) => ({ ...f, ...patch }));
+
+    if (q) set({ q });
+    if (pool === "same_team" || pool === "company") set({ pool });
+    if (overdue) set({ overdue: true });
+    if (upcoming) set({ upcoming: true });
+
+    if (stage) {
+      set({ stage });
+    }
+
+    if (owner === "me") {
+      fetch("/api/me")
+        .then((r) => r.json())
+        .then((m) => set({ owner: m.id }))
+        .catch(() => {});
+    } else if (owner) {
+      set({ owner });
+    }
+  }, [params]);
 
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(filters.q), 300);
@@ -66,12 +99,16 @@ export default function CreatorsPage() {
     setLoading(true);
     const params = new URLSearchParams();
     if (debouncedQ) params.set("q", debouncedQ);
-    if (filters.team) params.set("team", filters.team);
-    if (filters.stage) params.set("stage", filters.stage);
+    if (filters.team && filters.team !== "all-team") params.set("team", filters.team);
+    if (filters.stage && filters.stage !== "all-stage") params.set("stage", filters.stage);
     if (filters.platform) params.set("platform", filters.platform);
-    if (filters.pool) params.set("pool", filters.pool);
+    if (filters.pool && filters.pool !== "all-pool") params.set("pool", filters.pool);
+    if (filters.owner) params.set("owner", filters.owner);
+    if (filters.overdue) params.set("overdue", "1");
+    if (filters.upcoming) params.set("upcoming", "1");
     try {
       const res = await fetch(`/api/creators?${params}`);
+      if (!res.ok) return;
       const data = await res.json();
       setCreators(data);
     } catch {
@@ -81,18 +118,17 @@ export default function CreatorsPage() {
     }
   }, [debouncedQ, filters]);
 
-React.useEffect(() => {
+  React.useEffect(() => {
     Promise.all([load(), fetch("/api/creators/options").then((r) => r.json()).then((d) => {
       setStages(d.stages ?? []);
       const seen = new Set<string>();
       const teamOptions = [
-        { value: "", label: "All teams" },
+        { value: "all-team", label: "All teams" },
         { value: "unassigned", label: "Unassigned" },
         ...(d.teams ?? []).map((t: { id: string; name: string }) => ({ value: t.id, label: t.name })),
       ].filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
       setTeams(teamOptions);
     }).catch(() => {})]);
-      
   }, [load]);
 
   return (
@@ -187,7 +223,7 @@ React.useEffect(() => {
             <SelectValue placeholder="All availability" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">All availability</SelectItem>
+            <SelectItem value="all-pool">All availability</SelectItem>
             <SelectItem value="same_team">Same-team pool</SelectItem>
             <SelectItem value="company">Company pool</SelectItem>
           </SelectContent>
@@ -213,7 +249,7 @@ React.useEffect(() => {
       ) : view === "table" ? (
         <CreatorsTable creators={creators} />
       ) : (
-        <KanbanBoard creators={creators} stages={stages} canMove={canMove} />
+        <KanbanBoard creators={creators} stages={stages} />
       )}
 
       <CreatorFormDialog

@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { logActivity, logTransaction } from "@/lib/activity";
 import { jsonError, requireApiUser } from "@/lib/api-utils";
+import { storeUpload } from "@/lib/blob";
 import type { SessionUser } from "@/lib/auth";
 import type { ActivityType } from "@prisma/client";
-
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireApiUser();
@@ -44,15 +41,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     loggedAt = loggedAtRaw ? new Date(String(loggedAtRaw)) : new Date();
     const file = form.get("file") as File | null;
     if (file && file.size > 0) {
-      await fs.mkdir(UPLOAD_DIR, { recursive: true });
-      const filename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-      const buffer = Buffer.from(await file.arrayBuffer());
-      await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
+      if (file.size > 10 * 1024 * 1024) {
+        return jsonError("Attachments must be smaller than 10 MB.", 400);
+      }
+      const stored = await storeUpload(file, "attachments");
       attachment = {
-        filename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
-        path: `/uploads/${filename}`,
+        filename: stored.filename,
+        mimeType: stored.mimeType,
+        size: stored.size,
+        path: stored.url,
       };
     }
   } else {

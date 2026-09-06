@@ -38,7 +38,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const fromName = engagement.stage.name;
     await prisma.engagement.update({
       where: { id },
-      data: { stageId, completedAt: target.isCompleted ? new Date() : engagement.completedAt },
+      data: { stageId, completedAt: target.isCompleted ? new Date() : null },
     });
     await logActivity({
       creatorId: engagement.creatorId,

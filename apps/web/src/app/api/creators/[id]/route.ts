@@ -41,8 +41,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const sameTeam = creator.ownerships.some((o) => o.teamId === session.teamId);
   const otherTeamOnly = creator.ownerships.length > 0 && !sameTeam;
 
-  // Limited view: unassigned teams only get status, stage and activity logs.
+  // Limited view: unassigned teams only get status, stage and activity logs —
+  // never another team's deal, deliverable or gifting details.
   const canViewFull = sameTeam || owns || !otherTeamOnly;
+
+  const redactedEngagements = creator.engagements.map((e) =>
+    canViewFull ? e : { ...e, deliverables: [], gifts: [] },
+  );
 
   let poolStatus: "none" | "same_team" | "company" = "none";
   const lastActivity = creator.activityLogs[0]?.loggedAt;
@@ -53,6 +58,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   return NextResponse.json({
     ...creator,
+    engagements: redactedEngagements,
     canViewFull,
     relationship: owns
       ? "owned"
@@ -80,6 +86,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   if (!session.permissions.includes("creator.edit")) {
     return jsonError("No permission to edit creators.", 403);
+  }
+
+  // Only the assigned owner, the team's manager, or the admin may edit a creator.
+  const creatorBefore = await prisma.creator.findUnique({
+    where: { id, deletedAt: null },
+    include: { ownerships: true },
+  });
+  if (!creatorBefore) return jsonError("Creator not found.", 404);
+  const isManager = session.roleSlug === "team-manager";
+  const owns = creatorBefore.ownerships.some((o) => o.userId === session.id);
+  const managesTeam = isManager && creatorBefore.ownerships.some((o) => o.teamId === session.teamId);
+  if (session.roleSlug !== "admin" && !owns && !managesTeam) {
+    return jsonError("You can only edit creators you own.", 403);
   }
 
   try {
@@ -130,6 +149,19 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!session.permissions.includes("creator.delete")) {
     return jsonError("No permission to delete creators.", 403);
   }
+
+  const creator = await prisma.creator.findUnique({
+    where: { id, deletedAt: null },
+    include: { ownerships: true },
+  });
+  if (!creator) return jsonError("Creator not found.", 404);
+  const isManager = session.roleSlug === "team-manager";
+  const owns = creator.ownerships.some((o) => o.userId === session.id);
+  const managesTeam = isManager && creator.ownerships.some((o) => o.teamId === session.teamId);
+  if (session.roleSlug !== "admin" && !owns && !managesTeam) {
+    return jsonError("You can only delete creators you own.", 403);
+  }
+
   await prisma.creator.update({ where: { id }, data: { deletedAt: new Date() } });
   await logTransaction({
     userId: session.id,

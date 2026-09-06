@@ -146,6 +146,8 @@ export interface CreatorListFilters {
   owner?: string;
   q?: string;
   pool?: string;
+  overdue?: boolean;
+  upcoming?: boolean;
 }
 
 export async function listCreators(user: SessionUser, filters: CreatorListFilters = {}) {
@@ -160,6 +162,29 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
     ...(filters.platform ? { profiles: { some: { platform: filters.platform as Platform } } } : {}),
     ...(filters.owner ? { ownerships: { some: { userId: filters.owner } } } : {}),
     ...(filters.stage ? { engagements: { some: { stageId: filters.stage } } } : {}),
+    ...(filters.overdue
+      ? {
+          engagements: {
+            some: {
+              deliverables: { some: { status: { not: "APPROVED" }, dueDate: { lt: now } } },
+            },
+          },
+        }
+      : {}),
+    ...(filters.upcoming
+      ? {
+          engagements: {
+            some: {
+              deliverables: {
+                some: {
+                  status: { not: "APPROVED" },
+                  dueDate: { gte: now, lt: addDays(now, 7) },
+                },
+              },
+            },
+          },
+        }
+      : {}),
   };
 
   const creators = await prisma.creator.findMany({
@@ -206,6 +231,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
       const currentStage = latestEngagement?.stage ?? null;
       const isOtherTeam =
         !owns && !sameTeamOther && !unassigned && c.ownerships.some((o) => o.teamId !== user.teamId);
+      const isManager = user.roleSlug === "team-manager";
 
       return {
         id: c.id,
@@ -227,6 +253,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
         stage: currentStage ? { id: currentStage.id, name: currentStage.name } : null,
         currentEngagementId: latestEngagement?.id ?? null,
         completedAt: c.engagements.find((e) => e.completedAt)?.completedAt ?? null,
+        canMove: canMoveStage(user, owns, isManager),
         nextDeliverable: isOtherTeam
           ? null
           : nextDeliverable

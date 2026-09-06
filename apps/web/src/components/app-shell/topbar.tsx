@@ -18,8 +18,9 @@ import { initials } from "@/lib/display";
 import { logoutAction } from "@/app/(auth)/login/actions";
 import { SearchBox } from "./search";
 
-export function Topbar({ unreadCount }: { unreadCount: number }) {
+export function Topbar({ unreadCount: initialUnread }: { unreadCount: number }) {
   const { resolvedTheme, setTheme } = useTheme();
+  const [unreadCount, setUnreadCount] = React.useState(initialUnread);
   const [user, setUser] = React.useState<{
     displayName: string;
     avatarUrl: string | null;
@@ -33,6 +34,20 @@ export function Topbar({ unreadCount }: { unreadCount: number }) {
       .then(setUser)
       .catch(() => {});
   }, []);
+
+  // Keep the notification badge in sync when notifications are read elsewhere.
+  const refreshUnread = React.useCallback(() => {
+    fetch("/api/notifications?unread=true")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setUnreadCount(Array.isArray(list) ? list.length : 0))
+      .catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    refreshUnread();
+    window.addEventListener("notifications-updated", refreshUnread);
+    return () => window.removeEventListener("notifications-updated", refreshUnread);
+  }, [refreshUnread]);
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm">

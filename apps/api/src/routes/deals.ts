@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { prisma } from '../index.js'
-import { DEAL_STAGES } from '@track-crm/shared'
+import { DEAL_STAGES } from '@parishia-smart/shared'
 
 const dealSchema = z.object({
   name: z.string().min(1),

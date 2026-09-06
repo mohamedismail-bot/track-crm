@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { api } from "../api";
 import { colors, formatDate } from "../theme";
-import { CONTACT_STATUSES, type Contact } from "@track-crm/shared";
+import { CONTACT_STATUSES, type Contact } from "@parishia-smart/shared";
 
 const statusColors: Record<string, string> = {
   lead: "#f3f4f6",

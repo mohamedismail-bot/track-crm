@@ -1,15 +1,15 @@
-# Track CRM
+# Parishia Smart
 
-CRM application: a dashboard, API backend, and mobile app for tracking contacts, deals, and activities.
+Creator outreach, tracking, and gifting workspace: a dashboard, API backend, and mobile app for tracking creators, engagements, deliverables, and gifts.
 
 ## Packages
 
-| Package             | Path             | Description                                  |
-| ------------------- | ---------------- | -------------------------------------------- |
-| `@track-crm/api`    | `apps/api`       | Hono API server + Prisma + SQLite/Postgres   |
-| `web`               | `apps/web`       | Next.js dashboard                            |
-| `mobile`            | `apps/mobile`    | React Native (Expo) mobile app               |
-| `@track-crm/shared` | `packages/shared`| Shared types                                 |
+| Package                  | Path             | Description                                  |
+| ------------------------ | ---------------- | -------------------------------------------- |
+| `@parishia-smart/api`    | `apps/api`       | Hono API server + Prisma + SQLite/Postgres   |
+| `web`                    | `apps/web`       | Next.js dashboard                            |
+| `mobile`                 | `apps/mobile`    | React Native (Expo) mobile app               |
+| `@parishia-smart/shared` | `packages/shared`| Shared types                                 |
 
 ## Requirements
 
@@ -26,18 +26,18 @@ pnpm install
 ## Run the API
 
 ```bash
-pnpm --filter @track-crm/api db:generate
-pnpm --filter @track-crm/api db:migrate   # creates apps/api/prisma/dev.db
-pnpm --filter @track-crm/api db:seed      # sample data
-pnpm --filter @track-crm/api dev          # http://localhost:4000
+pnpm --filter @parishia-smart/api db:generate
+pnpm --filter @parishia-smart/api db:migrate   # creates apps/api/prisma/dev.db
+pnpm --filter @parishia-smart/api db:seed      # sample data
+pnpm --filter @parishia-smart/api dev          # http://localhost:4000
 ```
 
 To use Postgres instead of SQLite:
 
 1. Create a Postgres database.
 2. In `apps/api/prisma/schema.prisma`, change `provider = "sqlite"` → `"postgresql"`.
-3. Set `DATABASE_URL="postgresql://user:pass@localhost:5432/trackcrm"` in `apps/api/.env`.
-4. Run `pnpm --filter @track-crm/api db:migrate`.
+3. Set `DATABASE_URL="postgresql://user:pass@localhost:5432/parishiasmart"` in `apps/api/.env`.
+4. Run `pnpm --filter @parishia-smart/api db:migrate`.
 
 ## Run the dashboard
 

@@ -1,4 +1,4 @@
-import type { Activity, Contact, DashboardStats, Deal } from "@track-crm/shared";
+import type { Activity, Contact, DashboardStats, Deal } from "@parishia-smart/shared";
 
 const API_BASE = "http://localhost:4000";
 

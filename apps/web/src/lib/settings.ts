@@ -23,7 +23,7 @@ export async function getSettings(): Promise<WorkspaceSettings> {
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   const all = { ...DEFAULT_SETTINGS, ...map };
   return {
-    name: all[SETTING_KEYS.WORKSPACE_NAME] ?? "Track CRM",
+    name: all[SETTING_KEYS.WORKSPACE_NAME] ?? "Parishia Smart",
     logoUrl: all[SETTING_KEYS.COMPANY_LOGO] ?? "",
     primaryColor: all[SETTING_KEYS.PRIMARY_COLOR] || DEFAULT_PRIMARY_COLOR,
     multiTeam: all[SETTING_KEYS.MULTI_TEAM] === "true",
@@ -66,4 +66,22 @@ export async function setSettingsMany(entries: Record<string, string>) {
   for (const [key, value] of Object.entries(entries)) {
     await setSetting(key, value);
   }
+}
+
+/**
+ * Validate a new/adjusted password against the workspace password policy.
+ * Returns an error message when the password does not satisfy the policy,
+ * or null when it is acceptable.
+ */
+export async function validatePassword(pw: string): Promise<string | null> {
+  const settings = await getSettings();
+  if (pw.length < settings.passwordMinLength) {
+    return `Password must be at least ${settings.passwordMinLength} characters.`;
+  }
+  if (settings.passwordComplexity) {
+    if (!/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw) || !/[^A-Za-z0-9]/.test(pw)) {
+      return "Password must include upper and lower case letters, a number and a symbol.";
+    }
+  }
+  return null;
 }

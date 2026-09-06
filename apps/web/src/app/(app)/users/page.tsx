@@ -193,7 +193,7 @@ export default function UsersPage() {
                       variant="ghost"
                       title="Reset password"
                       onClick={() => {
-                        const pw = prompt("New password (min 8 chars)");
+                        const pw = prompt("New password (workspace policy applies)");
                         if (pw) patch(u.id, { password: pw });
                       }}
                     >
