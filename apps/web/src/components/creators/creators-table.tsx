@@ -26,7 +26,7 @@ import {
   formatDate,
   timeAgo,
 } from "@/lib/display";
-import { CreatorListItem, relationshipLabel } from "./creator-card";
+import { CreatorListItem, relationshipLabel, approvalBadge, incompleteBadge } from "./creator-card";
 
 type TableRow = CreatorListItem;
 
@@ -45,7 +45,11 @@ function columns(): LegacyColumnDef<TableRow>[] {
               <AvatarImage src={c.avatarUrl ?? undefined} alt={c.name} />
               <AvatarFallback>{initials(c.name)}</AvatarFallback>
             </Avatar>
-            {c.name}
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              {c.name}
+              {approvalBadge(c)}
+              {incompleteBadge(c)}
+            </span>
           </Link>
         );
       },
@@ -93,11 +97,24 @@ function columns(): LegacyColumnDef<TableRow>[] {
         relationshipLabel(getValue() as TableRow["relationship"]),
     },
     {
-      accessorKey: "teams",
-      header: "Team",
+      accessorKey: "owners",
+      header: "Owner",
       cell: ({ getValue }: CellCtx) => {
-        const v = getValue() as TableRow["teams"];
-        return v.length ? v.map((t) => t.name).join(", ") : "—";
+        const v = getValue() as TableRow["owners"];
+        if (!v.length) return "—";
+        return (
+          <div className="flex -space-x-2">
+            {v.slice(0, 3).map((o) => (
+              <div
+                key={o.id}
+                title={`${o.name} · ${o.teamName}`}
+                className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[10px] font-medium ring-2 ring-background"
+              >
+                {initials(o.name).slice(0, 2)}
+              </div>
+            ))}
+          </div>
+        );
       },
     },
     {
@@ -165,7 +182,7 @@ export function CreatorsTable({ creators }: { creators: CreatorListItem[] }) {
         <TableBody>
           {table.getRowModel().rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
+              <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
                 No creators match the current filters.
               </TableCell>
             </TableRow>

@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
         error: result.message,
         needsException: result.needsException,
         blocked: result.blocked,
+        missingFields: result.missingFields,
       },
       { status: 409 },
     );

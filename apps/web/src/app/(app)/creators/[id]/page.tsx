@@ -14,6 +14,10 @@ import {
   CheckCircle2,
   XCircle,
   Upload,
+  AlertTriangle,
+  MapPin,
+  ShieldAlert,
+  Store,
 } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -58,7 +62,8 @@ import {
   timeAgo,
   isOverdue,
 } from "@/lib/display";
-import type { Platform, DealType } from "@prisma/client";
+import { CreatorFormDialog, type EditableCreatorInput } from "@/components/creators/creator-form";
+import type { Platform, DealType, ApprovalStatus } from "@prisma/client";
 
 type Relationship = "owned" | "same_team" | "same_team_manager" | "other_team" | "available" | "none";
 
@@ -124,14 +129,23 @@ interface CreatorDetail {
   niche: string | null;
   email: string | null;
   phone: string | null;
+  gender: string | null;
+  shopifyRegistered: boolean | null;
   city: string | null;
   country: string | null;
   creatorType: string | null;
+  countryRef: { id: string; name: string; dialCode: string } | null;
+  cityRef: { id: string; name: string } | null;
+  creatorTypeRef: { id: string; name: string } | null;
+  customFields: Record<string, string | number | boolean | null>;
   followers: number | null;
   engagementRate: number | null;
   notes: string | null;
   avatarUrl: string | null;
   createdAt: string;
+  approvalStatus: ApprovalStatus | null;
+  reviewComment: string | null;
+  createdBy: { id: string; displayName: string; teamId: string | null } | null;
   primaryProfile: Profile | null;
   profiles: Profile[];
   ownerships: {
@@ -147,6 +161,9 @@ interface CreatorDetail {
   isOwnedByMe: boolean;
   canMove: boolean;
   canLog: boolean;
+  canReviewApproval: boolean;
+  missingRequiredForGifting: string[];
+  incompleteData: boolean;
 }
 
 function ActivityForm({ creatorId, canLog, onLogged }: { creatorId: string; canLog: boolean; onLogged: () => void }) {
@@ -217,7 +234,6 @@ function ActivityForm({ creatorId, canLog, onLogged }: { creatorId: string; canL
       {file ? (
         <p className="text-xs text-muted-foreground">Attached: {file.name} ({Math.round(file.size / 1024)} KB)</p>
       ) : null}
-      {description ? null : null}
       {canLog ? null : (
         <p className="text-xs text-muted-foreground">Only owners and team managers can log activity.</p>
       )}
@@ -237,18 +253,10 @@ export default function CreatorProfilePage() {
   const [giftProductName, setGiftProductName] = React.useState("");
   const [giftDescription, setGiftDescription] = React.useState("");
   const [giftBusy, setGiftBusy] = React.useState(false);
-  const [editForm, setEditForm] = React.useState({
-    name: "",
-    niche: "",
-    email: "",
-    phone: "",
-    city: "",
-    country: "",
-    creatorType: "",
-    followers: "",
-    engagementRate: "",
-    notes: "",
-  });
+  const [rejectOpen, setRejectOpen] = React.useState(false);
+  const [rejectReason, setRejectReason] = React.useState("");
+  const [reviewBusy, setReviewBusy] = React.useState(false);
+  const [me, setMe] = React.useState<{ id: string; roleSlug: string } | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -260,18 +268,6 @@ export default function CreatorProfilePage() {
       }
       const data = await res.json();
       setCreator(data);
-      setEditForm({
-        name: data.name ?? "",
-        niche: data.niche ?? "",
-        email: data.email ?? "",
-        phone: data.phone ?? "",
-        city: data.city ?? "",
-        country: data.country ?? "",
-        creatorType: data.creatorType ?? "",
-        followers: data.followers?.toString() ?? "",
-        engagementRate: data.engagementRate?.toString() ?? "",
-        notes: data.notes ?? "",
-      });
     } finally {
       setLoading(false);
     }
@@ -279,32 +275,50 @@ export default function CreatorProfilePage() {
 
   React.useEffect(() => {
     load();
+    fetch("/api/me")
+      .then((r) => r.json())
+      .then(setMe)
+      .catch(() => {});
   }, [load]);
 
-  const saveEdit = async () => {
-    const body: Record<string, string | number> = {
-      name: editForm.name,
-      niche: editForm.niche,
-      email: editForm.email,
-      phone: editForm.phone,
-      city: editForm.city,
-      country: editForm.country,
-      creatorType: editForm.creatorType,
-      notes: editForm.notes,
-    };
-    if (editForm.followers) body.followers = Number(editForm.followers);
-    if (editForm.engagementRate) body.engagementRate = Number(editForm.engagementRate);
-    const res = await fetch(`/api/creators/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const j = await res.json();
-    if (!res.ok) return toast({ title: j.error ?? "Could not save", variant: "destructive" });
-    setEditOpen(false);
-    toast({ title: "Saved" });
-    load();
-  };
+  const editInitial: EditableCreatorInput | null = React.useMemo(
+    () =>
+      creator
+        ? {
+            id: creator.id,
+            name: creator.name,
+            email: creator.email ?? null,
+            phone: creator.phone ?? null,
+            countryId: creator.countryRef?.id ?? null,
+            cityId: creator.cityRef?.id ?? null,
+            creatorTypeId: creator.creatorTypeRef?.id ?? null,
+            gender: creator.gender ?? null,
+            shopifyRegistered: creator.shopifyRegistered ?? false,
+            niche: creator.niche ?? null,
+            followers: creator.followers,
+            engagementRate: creator.engagementRate,
+            notes: creator.notes ?? null,
+            avatarUrl: creator.avatarUrl ?? null,
+            customFields: creator.customFields ?? {},
+            profiles: creator.profiles.map((p) => ({
+              platform: p.platform,
+              handle: p.handle,
+              isPrimary: p.isPrimary,
+            })),
+            countryValue: creator.countryRef?.name ?? null,
+            cityValue: creator.cityRef?.name ?? null,
+            creatorTypeValue: creator.creatorTypeRef?.name ?? null,
+          }
+        : null,
+    [creator],
+  );
+
+  const isRequester = creator?.createdBy?.id === me?.id;
+  const canEditProfile =
+    creator?.canMove ||
+    creator?.relationship === "same_team_manager" ||
+    (creator?.approvalStatus != null && isRequester) ||
+    me?.roleSlug === "admin";
 
   const performAvailabilityRequest = async () => {
     const res = await fetch(`/api/creators/${id}/availability-request`, {
@@ -350,6 +364,13 @@ export default function CreatorProfilePage() {
       });
       const j = await res.json();
       if (!res.ok) {
+        if (j.missingFields?.length) {
+          return toast({
+            title: "This creator is missing data required for gifting",
+            description: `Missing: ${j.missingFields.join(", ")}`,
+            variant: "destructive",
+          });
+        }
         return toast({ title: j.error ?? "Could not request gift", variant: "destructive" });
       }
       toast({ title: j.message ?? "Gift requested" });
@@ -359,6 +380,30 @@ export default function CreatorProfilePage() {
       toast({ title: "Could not request gift", variant: "destructive" });
     } finally {
       setGiftBusy(false);
+    }
+  };
+
+  const review = async (decision: "approve" | "reject") => {
+    setReviewBusy(true);
+    try {
+      const res = await fetch(`/api/creators/${id}/approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          reason: decision === "reject" ? rejectReason : undefined,
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok) return toast({ title: j.error ?? "Could not review", variant: "destructive" });
+      toast({ title: decision === "approve" ? "Creator approved" : "Creator rejected" });
+      setRejectOpen(false);
+      setRejectReason("");
+      load();
+    } catch {
+      toast({ title: "Could not review", variant: "destructive" });
+    } finally {
+      setReviewBusy(false);
     }
   };
 
@@ -380,6 +425,70 @@ export default function CreatorProfilePage() {
         </Link>
       </Button>
 
+      {creator.approvalStatus === "PENDING" ? (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="flex flex-wrap items-center gap-3 pt-5">
+            <ShieldAlert className="h-5 w-5 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Pending approval</p>
+              <p className="text-xs text-muted-foreground">
+                Requested by {creator.createdBy?.displayName ?? "—"}. This creator cannot be worked until a Team Manager approves it.
+              </p>
+            </div>
+            {creator.canReviewApproval ? (
+              <div className="flex items-center gap-2">
+                <Button size="sm" disabled={reviewBusy} onClick={() => review("approve")}>
+                  <CheckCircle2 className="mr-1 h-4 w-4" /> Approve
+                </Button>
+                <Button size="sm" variant="outline" disabled={reviewBusy} onClick={() => setRejectOpen(true)}>
+                  <XCircle className="mr-1 h-4 w-4" /> Reject
+                </Button>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {creator.approvalStatus === "REJECTED" ? (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="pt-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <XCircle className="h-5 w-5 text-destructive" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">Rejected</p>
+                <p className="text-xs text-muted-foreground">
+                  {creator.reviewComment ?? "No reason provided."}
+                </p>
+              </div>
+              {isRequester || me?.roleSlug === "admin" ? (
+                <Button size="sm" onClick={() => setEditOpen(true)}>
+                  Edit and resubmit
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {creator.incompleteData && !creator.approvalStatus && creator.isOwnedByMe ? (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="flex flex-wrap items-center gap-3 pt-5">
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Incomplete data</p>
+              <p className="text-xs text-muted-foreground">
+                Add {creator.missingRequiredForGifting.join(", ")} before requesting a gift.
+              </p>
+            </div>
+            {canEditProfile ? (
+              <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
+                Complete profile
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardContent className="flex flex-wrap items-start gap-4 pt-6">
           <Avatar className="h-16 w-16">
@@ -389,6 +498,9 @@ export default function CreatorProfilePage() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold">{creator.name}</h1>
+              {creator.approvalStatus === "PENDING" ? <Badge variant="warning">Pending approval</Badge> : null}
+              {creator.approvalStatus === "REJECTED" ? <Badge variant="destructive">Rejected</Badge> : null}
+              {!creator.approvalStatus && creator.incompleteData ? <Badge variant="info">Incomplete data</Badge> : null}
               {creator.poolStatus === "company" ? <Badge>Pool · company</Badge> : null}
               {creator.poolStatus === "same_team" ? <Badge variant="secondary">Pool · team</Badge> : null}
               {creator.relationship === "owned" ? <Badge variant="outline">Owned by me</Badge> : null}
@@ -405,12 +517,23 @@ export default function CreatorProfilePage() {
                   <Tag className="h-3.5 w-3.5" /> {creator.creatorType}
                 </span>
               ) : null}
+              {creator.shopifyRegistered ? (
+                <span className="inline-flex items-center gap-1 text-emerald-600">
+                  <Store className="h-3.5 w-3.5" /> Shopify
+                </span>
+              ) : null}
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {creator.primaryProfile ? (
+              {creator.primaryProfile && creator.primaryProfile.url ? (
                 <a href={creator.primaryProfile.url} target="_blank" rel="noreferrer" className="text-xs inline-flex items-center gap-1 text-primary hover:underline">
                   <ExternalLink className="h-3 w-3" /> Profile link
                 </a>
+              ) : null}
+              {creator.gender ? (
+                <span className="inline-flex items-center gap-1 text-xs"><Tag className="h-3 w-3" /> {creator.gender}</span>
+              ) : null}
+              {creator.city && creator.country ? (
+                <span className="inline-flex items-center gap-1 text-xs"><MapPin className="h-3 w-3" /> {creator.city}, {creator.country}</span>
               ) : null}
               {creator.email ? (
                 <span className="inline-flex items-center gap-1 text-xs"><Mail className="h-3 w-3" /> {creator.email}</span>
@@ -429,63 +552,52 @@ export default function CreatorProfilePage() {
             {creator.relationship === "other_team" ? (
               <Button onClick={performAvailabilityRequest}>Request availability</Button>
             ) : null}
-            {creator.canMove ? (
-              <Button variant="outline" onClick={() => setEditOpen(true)}>Edit</Button>
+            {canEditProfile ? (
+              <Button variant="outline" onClick={() => setEditOpen(true)}>
+                {creator.approvalStatus === "REJECTED" ? "Edit & resubmit" : "Edit"}
+              </Button>
             ) : null}
           </div>
         </CardContent>
       </Card>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <Dialog open={rejectOpen} onOpenChange={(v) => { setRejectOpen(v); if (!v) setRejectReason(""); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit creator</DialogTitle>
-            <DialogDescription>Update basic profile details for {creator.name}.</DialogDescription>
+            <DialogTitle>Reject {creator.name}</DialogTitle>
+            <DialogDescription>
+              Rejection notifies the requester. They can edit the creator and resubmit it for approval.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <Label htmlFor="edit-name">Name</Label>
-              <Input id="edit-name" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
-            </div>
-            <div className="sm:col-span-2">
-              <Label htmlFor="edit-niche">Niche</Label>
-              <Input id="edit-niche" value={editForm.niche} onChange={(e) => setEditForm((f) => ({ ...f, niche: e.target.value }))} />
-            </div>
-            <div>
-              <Label htmlFor="edit-email">Email</Label>
-              <Input id="edit-email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} />
-            </div>
-            <div>
-              <Label htmlFor="edit-phone">Phone</Label>
-              <Input id="edit-phone" value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} />
-            </div>
-            <div>
-              <Label htmlFor="edit-city">City</Label>
-              <Input id="edit-city" value={editForm.city} onChange={(e) => setEditForm((f) => ({ ...f, city: e.target.value }))} />
-            </div>
-            <div>
-              <Label htmlFor="edit-country">Country</Label>
-              <Input id="edit-country" value={editForm.country} onChange={(e) => setEditForm((f) => ({ ...f, country: e.target.value }))} />
-            </div>
-            <div>
-              <Label htmlFor="edit-followers">Followers</Label>
-              <Input id="edit-followers" type="number" value={editForm.followers} onChange={(e) => setEditForm((f) => ({ ...f, followers: e.target.value }))} />
-            </div>
-            <div>
-              <Label htmlFor="edit-er">Engagement rate (%)</Label>
-              <Input id="edit-er" type="number" value={editForm.engagementRate} onChange={(e) => setEditForm((f) => ({ ...f, engagementRate: e.target.value }))} />
-            </div>
-            <div className="sm:col-span-2">
-              <Label htmlFor="edit-type">Creator type</Label>
-              <Input id="edit-type" value={editForm.creatorType} onChange={(e) => setEditForm((f) => ({ ...f, creatorType: e.target.value }))} />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reject-reason">Reason</Label>
+            <textarea
+              id="reject-reason"
+              className="min-h-[90px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+              placeholder="Why is this creator being rejected?"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={saveEdit}>Save</Button>
+            <Button variant="outline" disabled={reviewBusy} onClick={() => setRejectOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" disabled={reviewBusy || !rejectReason.trim()} onClick={() => review("reject")}>
+              Reject creator
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreatorFormDialog
+        key={editInitial?.id ?? "new"}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        mode="edit"
+        initial={editInitial}
+        onSaved={load}
+      />
 
       <Dialog open={giftOpen} onOpenChange={setGiftOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -697,10 +809,31 @@ export default function CreatorProfilePage() {
                 <CardContent className="grid gap-x-6 gap-y-3 pt-6 text-sm sm:grid-cols-2">
                   <p className="text-muted-foreground">Niche</p>
                   <p>{creator.niche ?? "—"}</p>
+                  <p className="text-muted-foreground">Gender</p>
+                  <p>{creator.gender ?? "—"}</p>
                   <p className="text-muted-foreground">City / Country</p>
                   <p>{creator.city ?? "—"} / {creator.country ?? "—"}</p>
+                  <p className="text-muted-foreground">Creator type</p>
+                  <p>{creator.creatorType ?? "—"}</p>
+                  <p className="text-muted-foreground">Email</p>
+                  <p>{creator.email ?? "—"}</p>
+                  <p className="text-muted-foreground">Phone</p>
+                  <p>{creator.phone ?? "—"}</p>
+                  <p className="text-muted-foreground">Shopify</p>
+                  <p>{creator.shopifyRegistered ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : "—"}</p>
                   <p className="text-muted-foreground">Created</p>
                   <p>{formatDate(creator.createdAt)}</p>
+                  {Object.keys(creator.customFields ?? {}).length ? (
+                    <p className="text-muted-foreground col-span-full mt-2 border-t pt-3">Custom fields</p>
+                  ) : null}
+                  <div className="col-span-full grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                    {Object.entries(creator.customFields ?? {}).map(([key, value]) => (
+                      <div key={key} className="col-span-1 flex justify-between gap-4">
+                        <span className="text-muted-foreground">{key}</span>
+                        <span className="text-right font-medium">{String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
                   <p className="text-muted-foreground">Notes</p>
                   <p className="whitespace-pre-wrap">{creator.notes ?? "—"}</p>
                   <p className="text-muted-foreground col-span-full mt-2 border-t pt-3 flex items-center gap-1">
@@ -745,12 +878,20 @@ export default function CreatorProfilePage() {
                 <CardTitle className="text-sm">Gift a creator</CardTitle>
               </CardHeader>
               <CardContent>
+                {creator.incompleteData && creator.isOwnedByMe ? (
+                  <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs">
+                    <p className="font-medium text-amber-800">Missing required data</p>
+                    <p className="mt-0.5 text-amber-700">
+                      {creator.missingRequiredForGifting.join(", ")} — needed before a gift can be requested.
+                    </p>
+                  </div>
+                ) : null}
                 <Button
                   variant="outline"
                   className="w-full"
                   size="sm"
                   onClick={openGift}
-                  disabled={creator.engagements.length === 0}
+                  disabled={creator.engagements.length === 0 || (creator.incompleteData && creator.isOwnedByMe)}
                 >
                   <PackagePlus className="mr-1 h-4 w-4" /> Request gift
                 </Button>

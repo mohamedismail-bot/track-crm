@@ -16,6 +16,8 @@ import {
 export interface CreatorListItem {
   id: string;
   name: string;
+  gender: string | null;
+  shopifyRegistered: boolean | null;
   niche: string | null;
   avatarUrl: string | null;
   followers: number | null;
@@ -23,6 +25,9 @@ export interface CreatorListItem {
   platform: Platform | null;
   handle: string | null;
   profileUrl: string | null;
+  city: string | null;
+  country: string | null;
+  creatorType: string | null;
   owners: { id: string; name: string; teamId: string; teamName: string }[];
   teams: { id: string; name: string }[];
   stage: { id: string; name: string } | null;
@@ -33,6 +38,12 @@ export interface CreatorListItem {
   lastActivityAt: string | null;
   relationship: "owned" | "available" | "same_team" | "other_team" | "none";
   poolStatus: "none" | "same_team" | "company";
+  missingRequiredForGifting: string[];
+  incompleteData: boolean;
+  approvalStatus: "PENDING" | "REJECTED" | null;
+  approvalVisible: boolean;
+  requestedBy: { id: string; name: string; teamId: string | null } | null;
+  reviewComment: string | null;
   createdAt: string;
 }
 
@@ -55,6 +66,18 @@ export function poolBadge(c: CreatorListItem) {
   if (c.poolStatus === "company") return <Badge variant="default">Pool · company</Badge>;
   if (c.poolStatus === "same_team") return <Badge variant="secondary">Pool · team</Badge>;
   return null;
+}
+
+export function approvalBadge(c: CreatorListItem) {
+  if (c.approvalStatus === "PENDING") return <Badge variant="warning">Pending approval</Badge>;
+  if (c.approvalStatus === "REJECTED") return <Badge variant="destructive">Rejected</Badge>;
+  return null;
+}
+
+export function incompleteBadge(c: CreatorListItem) {
+  if (c.approvalStatus) return null;
+  if (!c.incompleteData) return null;
+  return <Badge variant="info">Incomplete data</Badge>;
 }
 
 export function CreatorCard({ creator }: { creator: CreatorListItem }) {
@@ -91,6 +114,16 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
         ) : null}
       </div>
 
+      <div className="flex flex-wrap gap-1">
+        {approvalBadge(creator)}
+        {incompleteBadge(creator)}
+        {creator.shopifyRegistered ? (
+          <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
+            Shopify
+          </Badge>
+        ) : null}
+      </div>
+
       {creator.niche ? (
         <p className="line-clamp-1 text-xs text-muted-foreground">{creator.niche}</p>
       ) : null}
@@ -123,17 +156,28 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
 
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/60 pt-3">
         {creator.owners.length > 0 ? (
-          <div className="flex -space-x-2">
-            {creator.owners.slice(0, 3).map((o) => (
-              <div
-                key={o.id}
-                title={`${o.name} · ${o.teamName}`}
-                className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-medium ring-2 ring-card"
-              >
-                {initials(o.name).slice(0, 2)}
-              </div>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <div className="flex -space-x-2">
+              {creator.owners.slice(0, 3).map((o) => (
+                <div
+                  key={o.id}
+                  title={`${o.name} · ${o.teamName}`}
+                  className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-medium ring-2 ring-card"
+                >
+                  {initials(o.name).slice(0, 2)}
+                </div>
+              ))}
+            </div>
+            {creator.approvalStatus ? (
+              <span className="truncate text-[11px] text-muted-foreground">
+                Requested by {creator.requestedBy?.name ?? "—"}
+              </span>
+            ) : null}
           </div>
+        ) : creator.approvalStatus ? (
+          <span className="text-xs text-muted-foreground">
+            Requested by {creator.requestedBy?.name ?? "—"}
+          </span>
         ) : (
           <span className="text-xs text-muted-foreground">Unassigned</span>
         )}

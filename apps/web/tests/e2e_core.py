@@ -324,8 +324,11 @@ def gift_exception_flow(browser):
                 results.append(("gift request succeeds (first in month)", True, ""))
                 break
             body = g.json()
-            if body.get("blocked") and "Previous gift" in (body.get("error") or ""):
-                continue  # hard-stop from an earlier run; try another creator
+            err = body.get("error") or ""
+            # The gifting gate hard-stops on previous-gift deliverable locks and
+            # on profiles missing Required-for-Gifting data — both are skippable.
+            if body.get("blocked") and ("Previous gift" in err or body.get("missingFields")):
+                continue
             results.append(("gift request succeeds (first in month)", False, str(g.status)))
             return results
 
@@ -346,7 +349,7 @@ def gift_exception_flow(browser):
         else:
             results.append(
                 ("gift request succeeds (first in month)", True,
-                 "SKIP: all owned creators blocked by previous-run gifts (hard-stop)"),
+                 "SKIP: all owned creators blocked by previous-run gifts or missing data (hard-stop)"),
             )
             results.append(
                 ("second same-month gift => exception(201/REQUESTED) or blocked(409)",

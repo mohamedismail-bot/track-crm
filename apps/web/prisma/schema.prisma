@@ -75,8 +75,15 @@ enum ActivityType {
   ENGAGEMENT_COMPLETED
   CREATOR_CREATED
   CREATOR_UPDATED
+  CREATOR_APPROVED
+  CREATOR_REJECTED
   REQUEST_CREATED
   REQUEST_RESOLVED
+}
+
+enum ApprovalStatus {
+  PENDING
+  REJECTED
 }
 
 enum AvailRequestStatus {
@@ -87,6 +94,7 @@ enum AvailRequestStatus {
 }
 
 enum NotificationType {
+  SYSTEM
   DELIVERABLE_OVERDUE
   DELIVERABLE_SUBMITTED
   DELIVERABLE_APPROVED
@@ -136,6 +144,7 @@ model User {
   approvedGifts         Gift[]               @relation("GiftApprover")
   createdEngagements    Engagement[]         @relation("EngagementCreator")
   createdCreators       Creator[]            @relation("CreatorCreator")
+  reviewedCreators      Creator[]            @relation("CreatorReviewer")
 }
 
 model Role {
@@ -186,6 +195,57 @@ model TransactionLog {
 }
 
 // ---------------------------------------------------------------------------
+// Reference data (admin-managed)
+// ---------------------------------------------------------------------------
+
+model Country {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  dialCode  String
+  createdAt DateTime @default(now())
+
+  cities   City[]
+  creators Creator[]
+}
+
+model City {
+  id        String   @id @default(cuid())
+  name      String
+  countryId String
+  createdAt DateTime @default(now())
+
+  country  Country  @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  creators Creator[]
+
+  @@unique([countryId, name])
+}
+
+model CreatorType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  creators Creator[]
+}
+
+// Admin-maintained definitions of creator fields. System rows (key != null)
+// map to built-in fields and cannot be deleted; custom rows are admin-defined.
+model CreatorField {
+  id        String   @id @default(cuid())
+  key       String?  @unique
+  label     String
+  type      String
+  required  Boolean  @default(false)
+  order     Int      @default(0)
+  options   String?
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([order])
+}
+
+// ---------------------------------------------------------------------------
 // Creators
 // ---------------------------------------------------------------------------
 
@@ -193,11 +253,11 @@ model Creator {
   id            String   @id @default(cuid())
   name          String
   niche         String?
-  email         String?
-  phone         String?
-  city          String?
-  country       String?
-  creatorType   String?
+  email         String?  @unique
+  phone         String?  @unique
+  gender        String?
+  shopifyRegistered Boolean?
+  customFields  Json?
   followers     Int?
   engagementRate Float?
   notes         String?
@@ -206,6 +266,24 @@ model Creator {
   deletedAt     DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  // Legacy free-text location/type columns (back-filled into FKs then dropped)
+  city        String?
+  country     String?
+  creatorType String?
+
+  countryId     String?
+  cityId        String?
+  creatorTypeId String?
+  countryRef     Country?     @relation(fields: [countryId], references: [id])
+  cityRef        City?        @relation(fields: [cityId], references: [id])
+  creatorTypeRef CreatorType? @relation(fields: [creatorTypeId], references: [id])
+
+  approvalStatus ApprovalStatus?
+  reviewedById   String?
+  reviewComment  String?
+  reviewedAt     DateTime?
+  reviewedBy     User? @relation("CreatorReviewer", fields: [reviewedById], references: [id])
 
   primaryProfileId String?  @unique
   primaryProfile   PlatformProfile? @relation("PrimaryProfile", fields: [primaryProfileId], references: [id])
@@ -220,6 +298,8 @@ model Creator {
 
   @@index([name])
   @@index([deletedAt])
+  @@index([approvalStatus])
+  @@index([cityId])
 }
 
 model PlatformProfile {

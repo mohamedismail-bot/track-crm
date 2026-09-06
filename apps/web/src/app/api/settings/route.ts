@@ -112,6 +112,27 @@ export async function PUT(req: NextRequest) {
   }
   if (body.passwordComplexity !== undefined)
     entries[SETTING_KEYS.PASSWORD_COMPLEXITY] = body.passwordComplexity ? "true" : "false";
+  if (body.genderOptions !== undefined) {
+    let opts: unknown = body.genderOptions;
+    if (typeof body.genderOptions === "string") {
+      try {
+        opts = JSON.parse(body.genderOptions);
+      } catch {
+        return jsonError("genderOptions must be a JSON array of strings.", 400);
+      }
+    }
+    if (
+      !Array.isArray(opts) ||
+      opts.length === 0 ||
+      typeof opts[0] !== "string" ||
+      opts.some((o) => typeof o !== "string" || !o.trim())
+    ) {
+      return jsonError("At least one gender option is required.", 400);
+    }
+    entries[SETTING_KEYS.GENDER_OPTIONS] = JSON.stringify(opts.map((o) => String(o).trim()));
+  }
+  if (body.approvalEnabled !== undefined)
+    entries[SETTING_KEYS.APPROVAL_REQUIRED] = body.approvalEnabled ? "true" : "false";
 
   if (Object.keys(entries).length === 0) return jsonError("No valid settings provided.", 400);
   await setSettingsMany(entries);

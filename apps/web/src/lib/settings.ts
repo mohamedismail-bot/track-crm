@@ -16,6 +16,8 @@ export interface WorkspaceSettings {
   exportEnabledRoles: string[];
   passwordMinLength: number;
   passwordComplexity: boolean;
+  genderOptions: string[];
+  approvalEnabled: boolean;
 }
 
 export async function getSettings(): Promise<WorkspaceSettings> {
@@ -36,6 +38,8 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     exportEnabledRoles: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_ROLES]),
     passwordMinLength: safeInt(all[SETTING_KEYS.PASSWORD_MIN_LENGTH], 8),
     passwordComplexity: all[SETTING_KEYS.PASSWORD_COMPLEXITY] === "true",
+    genderOptions: jsonArray(all[SETTING_KEYS.GENDER_OPTIONS]),
+    approvalEnabled: all[SETTING_KEYS.APPROVAL_REQUIRED] === "true",
   };
 }
 

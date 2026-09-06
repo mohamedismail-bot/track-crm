@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { getSettings } from "./settings";
 import { logActivity, logTransaction } from "./activity";
 import { notify } from "./notify";
+import { requiredForGiftingMissing, REQUIRED_FOR_GIFTING_LABELS } from "./constants";
 import type { SessionUser } from "./auth";
 import { DealType, DeliverableStatus, GiftStatus } from "@prisma/client";
 
@@ -77,6 +78,24 @@ export async function canRequestGift(user: SessionUser, engagementId: string) {
     return { ok: false as const, message: "Only the assigned owner or team manager can request a gift." };
   }
 
+  // Required for Gifting hard stop: Country, City, Creator Type and Phone must
+  // be populated before a gift may be requested. No override.
+  const missingGifting = requiredForGiftingMissing({
+    countryId: engagement.creator.countryId,
+    cityId: engagement.creator.cityId,
+    creatorTypeId: engagement.creator.creatorTypeId,
+    phone: engagement.creator.phone,
+  });
+  if (missingGifting.length > 0) {
+    const missingLabels = missingGifting.map((k) => REQUIRED_FOR_GIFTING_LABELS[k]).join(", ");
+    return {
+      ok: false as const,
+      blocked: true as const,
+      message: `This creator is missing required data for gifting: ${missingLabels}. Complete the record first.`,
+      missingFields: missingGifting,
+    };
+  }
+
   const settings = await getSettings();
 
   // Minimum stage gate
@@ -130,7 +149,7 @@ export async function requestGift(
   input: { productName: string; productDescription?: string },
 ): Promise<
   | { ok: true; status: GiftStatus; message: string; giftId: string }
-  | { ok: false; message: string; needsException?: boolean; blocked?: boolean }
+  | { ok: false; message: string; needsException?: boolean; blocked?: boolean; missingFields?: string[] }
 > {
   const check = await canRequestGift(user, engagementId);
   if (check.ok === false) {

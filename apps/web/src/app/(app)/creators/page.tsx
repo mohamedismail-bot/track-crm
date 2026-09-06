@@ -26,6 +26,14 @@ interface FilterOption {
   label: string;
 }
 
+interface ReferenceData {
+  countries: { id: string; name: string; dialCode: string; cities: { id: string; name: string }[] }[];
+  creatorTypes: { id: string; name: string }[];
+  fields: { id: string | null; key: string | null; label: string; type: string; options: string[] }[];
+  genderOptions: string[];
+  approvalEnabled: boolean;
+}
+
 export default function CreatorsPage() {
   const params = useSearchParams();
   const [view, setView] = React.useState<View>("card");
@@ -44,20 +52,29 @@ export default function CreatorsPage() {
     platform: "",
     pool: "all-pool",
     owner: "",
+    gender: "",
+    shopify: "",
+    pending: params.get("pending") === "1",
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
+    custom: {} as Record<string, string>,
   });
   const [me, setMe] = React.useState<{
     id: string;
     teamId: string;
     canCreate: boolean;
   } | null>(null);
+  const [refData, setRefData] = React.useState<ReferenceData | null>(null);
   const [debouncedQ, setDebouncedQ] = React.useState("");
 
   React.useEffect(() => {
     fetch("/api/me")
       .then((r) => r.json())
       .then(setMe)
+      .catch(() => {});
+    fetch("/api/reference")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setRefData)
       .catch(() => {});
   }, []);
 
@@ -67,12 +84,14 @@ export default function CreatorsPage() {
     const pool = params.get("pool");
     const q = params.get("q");
     const owner = params.get("owner");
+    const pending = params.get("pending") === "1";
     const overdue = params.get("overdue") === "1";
     const upcoming = params.get("upcoming") === "1";
     const set = (patch: Partial<typeof filters>) => setFilters((f) => ({ ...f, ...patch }));
 
     if (q) set({ q });
     if (pool === "same_team" || pool === "company") set({ pool });
+    if (pending) set({ pending: true });
     if (overdue) set({ overdue: true });
     if (upcoming) set({ upcoming: true });
 
@@ -104,8 +123,14 @@ export default function CreatorsPage() {
     if (filters.platform) params.set("platform", filters.platform);
     if (filters.pool && filters.pool !== "all-pool") params.set("pool", filters.pool);
     if (filters.owner) params.set("owner", filters.owner);
+    if (filters.gender) params.set("gender", filters.gender);
+    if (filters.shopify) params.set("shopify", filters.shopify);
+    if (filters.pending) params.set("pending", "1");
     if (filters.overdue) params.set("overdue", "1");
     if (filters.upcoming) params.set("upcoming", "1");
+    Object.entries(filters.custom).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
     try {
       const res = await fetch(`/api/creators?${params}`);
       if (!res.ok) return;
@@ -119,16 +144,20 @@ export default function CreatorsPage() {
   }, [debouncedQ, filters]);
 
   React.useEffect(() => {
-    Promise.all([load(), fetch("/api/creators/options").then((r) => r.json()).then((d) => {
-      setStages(d.stages ?? []);
-      const seen = new Set<string>();
-      const teamOptions = [
-        { value: "all-team", label: "All teams" },
-        { value: "unassigned", label: "Unassigned" },
-        ...(d.teams ?? []).map((t: { id: string; name: string }) => ({ value: t.id, label: t.name })),
-      ].filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
-      setTeams(teamOptions);
-    }).catch(() => {})]);
+    load();
+    fetch("/api/creators/options")
+      .then((r) => r.json())
+      .then((d) => {
+        setStages(d.stages ?? []);
+        const seen = new Set<string>();
+        const teamOptions = [
+          { value: "all-team", label: "All teams" },
+          { value: "unassigned", label: "Unassigned" },
+          ...(d.teams ?? []).map((t: { id: string; name: string }) => ({ value: t.id, label: t.name })),
+        ].filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
+        setTeams(teamOptions);
+      })
+      .catch(() => {});
   }, [load]);
 
   return (
@@ -228,6 +257,71 @@ export default function CreatorsPage() {
             <SelectItem value="company">Company pool</SelectItem>
           </SelectContent>
         </Select>
+        <Select
+          value={filters.gender}
+          onValueChange={(v) => setFilters((f) => ({ ...f, gender: v }))}
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="All genders" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all-gender">All genders</SelectItem>
+            {(refData?.genderOptions ?? []).map((g) => (
+              <SelectItem key={g} value={g}>
+                {g}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={filters.shopify}
+          onValueChange={(v) => setFilters((f) => ({ ...f, shopify: v }))}
+        >
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Shopify" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all-shopify">Any Shopify</SelectItem>
+            <SelectItem value="yes">Shopify registered</SelectItem>
+            <SelectItem value="no">Not registered</SelectItem>
+          </SelectContent>
+        </Select>
+        {refData?.approvalEnabled ? (
+          <Button
+            variant={filters.pending ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => setFilters((f) => ({ ...f, pending: !f.pending }))}
+          >
+            Pending approval{filters.pending ? " ✓" : ""}
+          </Button>
+        ) : null}
+        {(refData?.fields ?? []).map((field) => (
+          <Select
+            key={field.id ?? field.key ?? field.label}
+            value={filters.custom[field.id ?? field.key ?? field.label] ?? ""}
+            onValueChange={(v) =>
+              setFilters((f) => ({
+                ...f,
+                custom: {
+                  ...f.custom,
+                  [field.id ?? field.key ?? field.label]: v === "__clear__" ? "" : v,
+                },
+              }))
+            }
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder={field.label} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__clear__">All {field.label}</SelectItem>
+              {(field.options ?? []).map((opt) => (
+                <SelectItem key={opt} value={opt}>
+                  {opt}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ))}
       </div>
 
       {loading ? (

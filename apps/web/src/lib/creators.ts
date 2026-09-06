@@ -1,28 +1,44 @@
 import "server-only";
 import { prisma } from "./prisma";
-import { detectPlatformFromUrl, normalizeHandleFromUrl } from "./constants";
-import type { Platform, Prisma } from "@prisma/client";
+import {
+  buildE164,
+  detectPlatformFromUrl,
+  handleFromInput,
+  isValidEmail,
+  isValidE164,
+  looksLikeUrl,
+  normalizeHandleFromUrl,
+  requiredForGiftingMissing,
+  urlPlatformMismatch,
+} from "./constants";
+import { Prisma } from "@prisma/client";
+import type { Platform } from "@prisma/client";
 import { logActivity, logTransaction } from "./activity";
 import type { SessionUser } from "./auth";
+import { listCreatorFields, type CreatorFieldDef } from "./reference";
 
 export interface NewProfileInput {
-  url: string;
-  platform?: string;
+  platform: string;
+  input: string;
   isPrimary?: boolean;
 }
 
 export interface CreateCreatorInput {
   name: string;
   email?: string;
-  phone?: string;
+  phoneCountryId?: string;
+  phoneNumber?: string;
+  countryId?: string;
+  cityId?: string;
+  creatorTypeId?: string;
+  gender?: string;
+  shopifyRegistered?: boolean;
   niche?: string;
-  city?: string;
-  country?: string;
-  creatorType?: string;
   followers?: string | number;
   engagementRate?: string | number;
   notes?: string;
   avatarUrl?: string;
+  customFields?: Record<string, string | number | boolean | null>;
   profiles: NewProfileInput[];
 }
 
@@ -30,6 +46,246 @@ export function parseNumeric(value: string | number | undefined): number | null 
   if (value === undefined || value === null || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+export interface ValidatedProfile {
+  platform: Platform;
+  handle: string;
+  normalizedHandle: string;
+  url: string;
+  isPrimary: boolean;
+}
+
+/**
+ * Tolerantly normalise a single profile entry (bare handle, @handle or full
+ * link). Throws with a human message when the entry is unusable.
+ */
+export function validateProfileEntry(p: NewProfileInput): ValidatedProfile {
+  const platform = (p.platform || "OTHER") as Platform;
+  const raw = p.input?.trim() ?? "";
+  if (!raw) throw new Error("Every platform profile needs a handle.");
+  const detected = urlPlatformMismatch(raw, platform);
+  if (detected) {
+    throw new Error(
+      `That looks like a ${detected} link — different from the selected platform. Check the entry or pick ${detected}.`,
+    );
+  }
+  const handle = handleFromInput(raw);
+  if (!handle) {
+    throw new Error(
+      looksLikeUrl(raw)
+        ? `Could not read a handle from that link.`
+        : `Handle cannot contain spaces or slashes.`,
+    );
+  }
+  return {
+    platform,
+    handle,
+    normalizedHandle: handle,
+    url: raw.toLowerCase().includes("http") ? raw.trim() : raw.trim(),
+    isPrimary: p.isPrimary ?? false,
+  };
+}
+
+export interface ValidationResult {
+  data: {
+    name: string;
+    email: string | null;
+    phone: string | null;
+    countryId: string | null;
+    cityId: string | null;
+    creatorTypeId: string | null;
+    gender: string | null;
+    shopifyRegistered: boolean | null;
+    niche: string | null;
+    followers: number | null;
+    engagementRate: number | null;
+    notes: string | null;
+    avatarUrl: string | null;
+    customFields: Record<string, string | number | boolean | null>;
+    phoneCountryRow: { id: string; dialCode: string; name: string } | null;
+  };
+  profiles: ValidatedProfile[];
+  erroredMissingRequired: string[];
+}
+
+const SYSTEM_REQUIRED_VALUE_KEY: Record<string, (d: ValidationResult["data"]) => boolean> = {
+  email: (d) => !!d.email,
+  phone: (d) => !!d.phone,
+  gender: (d) => !!d.gender,
+  country: (d) => !!d.countryId,
+  city: (d) => !!d.cityId,
+  creatorType: (d) => !!d.creatorTypeId,
+  shopifyRegistered: (d) => d.shopifyRegistered !== null,
+  niche: (d) => !!d.niche,
+  followers: (d) => d.followers !== null,
+  engagementRate: (d) => d.engagementRate !== null,
+  notes: (d) => !!d.notes,
+  avatarUrl: (d) => !!d.avatarUrl,
+};
+
+/**
+ * Validate + normalise the shared creator payload. Throws Error with a
+ * user-facing message for hard validation failures (email/phone/type checks).
+ */
+export async function validateCreatorInput(
+  input: CreateCreatorInput,
+  opts: { isCreate: boolean },
+): Promise<ValidationResult> {
+  const { isCreate } = opts;
+  const errors: string[] = [];
+
+  if (!input.name?.trim()) errors.push("Creator name is required.");
+  const name = input.name?.trim() ?? "";
+
+  if (isCreate && (!input.profiles || input.profiles.length === 0)) {
+    errors.push("At least one platform profile is required.");
+  }
+
+  let email: string | null = null;
+  if (input.email && input.email.trim()) {
+    email = input.email.trim().toLowerCase();
+    if (!isValidEmail(email)) errors.push("Email must be a valid email address.");
+  }
+
+  let phone: string | null = null;
+  let phoneCountryRow: ValidationResult["data"]["phoneCountryRow"] = null;
+  if (input.phoneNumber && input.phoneNumber.replace(/\D/g, "").length > 0) {
+    const digits = input.phoneNumber.replace(/\D/g, "");
+    if (!input.phoneCountryId) {
+      errors.push("Pick a country dial code for the phone number.");
+    } else {
+      phoneCountryRow = await prisma.country.findUnique({ where: { id: input.phoneCountryId } });
+      if (!phoneCountryRow) {
+        errors.push("The selected dial-code country is not valid.");
+      } else {
+        phone = buildE164(phoneCountryRow.dialCode, digits);
+        if (!isValidE164(phone)) {
+          errors.push("Phone must be between 8 and 15 digits.");
+        }
+      }
+    }
+  }
+
+  let gender: string | null = null;
+  if (input.gender) {
+    const validGender = await import("./reference").then((m) => m.getGenderOptions());
+    if (validGender.includes(input.gender)) gender = input.gender;
+    else errors.push(`"${input.gender}" is not a valid gender option.`);
+  }
+
+  let countryId: string | null = null;
+  if (input.countryId) {
+    const country = await prisma.country.findUnique({ where: { id: input.countryId } });
+    if (!country) errors.push("Selected country is not valid.");
+    else countryId = country.id;
+  }
+
+  let cityId: string | null = null;
+  if (input.cityId) {
+    const city = await prisma.city.findUnique({ where: { id: input.cityId } });
+    if (!city) errors.push("Selected city is not valid.");
+    else if (countryId && city.countryId !== countryId) {
+      errors.push("Selected city does not belong to the selected country.");
+    } else cityId = city.id;
+  }
+
+  let creatorTypeId: string | null = null;
+  if (input.creatorTypeId) {
+    const type = await prisma.creatorType.findUnique({ where: { id: input.creatorTypeId } });
+    if (!type) errors.push("Selected creator type is not valid.");
+    else creatorTypeId = type.id;
+  }
+
+  const customFields: Record<string, string | number | boolean | null> = {};
+  if (input.customFields && typeof input.customFields === "object") {
+    const fields = await listCreatorFields();
+    const customOnly = fields.filter((f) => f.id && !f.key);
+    for (const entry of Object.entries(input.customFields)) {
+      const [fieldId, value] = entry;
+      const field = customOnly.find((f) => f.id === fieldId);
+      if (!field) {
+        errors.push("Unknown custom field was submitted.");
+        continue;
+      }
+      const cleaned = coerceFieldValue(field, value);
+      if (cleaned === null && value !== null && value !== undefined && value !== "") {
+        errors.push(`"${field.label}" has an invalid value.`);
+        continue;
+      }
+      if (cleaned !== null && cleaned !== "" && field.options.length && !field.options.includes(String(cleaned))) {
+        errors.push(`"${String(cleaned)}" is not an option for "${field.label}".`);
+        continue;
+      }
+      customFields[fieldId] = cleaned;
+    }
+  }
+
+  const data: ValidationResult["data"] = {
+    name,
+    email,
+    phone,
+    countryId,
+    cityId,
+    creatorTypeId,
+    gender,
+    shopifyRegistered: input.shopifyRegistered ?? null,
+    niche: input.niche?.trim() || null,
+    followers: parseNumeric(input.followers),
+    engagementRate: parseNumeric(input.engagementRate),
+    notes: input.notes?.trim() || null,
+    avatarUrl: input.avatarUrl?.trim() || null,
+    customFields: Object.keys(customFields).length ? customFields : {},
+    phoneCountryRow,
+  };
+
+  // Mandatory built-in fields (Name/Profiles handled separately by caller).
+  // Enforced at creation; on edits the record keeps existing values and the
+  // admin can flag incomplete records via the gifting gate instead.
+  const erroredMissingRequired: string[] = [];
+  if (isCreate) {
+    const fields = await listCreatorFields();
+    for (const field of fields) {
+      if (!field.required) continue;
+      const check = SYSTEM_REQUIRED_VALUE_KEY[field.key ?? ""];
+      if (check && !check(data)) {
+        erroredMissingRequired.push(field.label);
+        errors.push(`${field.label} is required.`);
+      }
+    }
+  }
+
+  if (errors.length) throw new Error(errors.join("\n"));
+  return { data, profiles: [], erroredMissingRequired };
+}
+
+/** Coerce a submitted custom field value into the value's native JSON type. */
+export function coerceFieldValue(
+  field: CreatorFieldDef,
+  value: string | number | boolean | null | undefined,
+): string | number | boolean | null {
+  if (value === null || value === undefined || value === "") return null;
+  switch (field.type) {
+    case "number":
+      return Number.isFinite(Number(value)) ? Number(value) : null;
+    case "boolean":
+      if (typeof value === "boolean") return value;
+      return value === "true" || value === "1" || value === "yes";
+    case "date": {
+      const iso = String(value);
+      if (!/^\d{4}-\d{2}-\d{2}/.test(iso)) return null;
+      return iso.slice(0, 10);
+    }
+    default:
+      return String(value);
+  }
+}
+
+export interface NewProfileResult {
+  platform: Platform;
+  handle: string;
+  url: string;
+  isPrimary: boolean;
 }
 
 /** Validate that a profile URL does not already belong to another creator. */
@@ -42,88 +298,175 @@ export async function findDuplicateProfile(url: string, platform?: string, exclu
       normalizedHandle: handle,
       creator: { isNot: excludeCreatorId ? { id: excludeCreatorId } : undefined },
     },
-    include: { creator: { include: { ownerships: { include: { team: true }, take: 1 } } } },
+    include: { creator: { include: { ownerships: { include: { user: true, team: true }, take: 1 } } } },
   });
 }
 
-export async function createCreator(input: CreateCreatorInput, user: SessionUser) {
-  if (!input.name.trim()) throw new Error("Creator name is required.");
-  if (input.profiles.length === 0) throw new Error("At least one platform profile is required.");
+/** Check a bare platform+handle for duplicates (for inline "view profile" UX). */
+export async function checkPlatformHandle(platform: Platform, handle: string, excludeCreatorId?: string) {
+  return findDuplicateProfile(handle, platform, excludeCreatorId);
+}
 
-  // Validate no duplicate handles in input
+/**
+ * Build the canonical profile URL (+ normalized handle) for a tolerant entry.
+ */
+export async function buildValidatedProfiles(
+  inputProfiles: NewProfileInput[],
+): Promise<NewProfileResult[]> {
+  return inputProfiles.map((p) => {
+    const v = validateProfileEntry(p);
+    return { platform: v.platform, handle: v.handle, url: v.url, isPrimary: v.isPrimary };
+  });
+}
+
+/** Replace a creator's platform profiles from tolerant entries (validated). */
+export async function replaceCreatorProfiles(
+  creatorId: string,
+  inputProfiles: NewProfileInput[],
+  tx: Prisma.TransactionClient = prisma,
+): Promise<NewProfileResult[]> {
+  const validated = inputProfiles.map((p) => validateProfileEntry(p));
+  if (validated.length === 0) throw new Error("A creator needs at least one platform profile.");
+
   const seen = new Set<string>();
-  for (const p of input.profiles) {
-    const handle = normalizeHandleFromUrl(p.url);
-    const key = `${p.platform ?? detectPlatformFromUrl(p.url)}:${handle}`;
-    if (seen.has(key)) {
-      throw new Error(`Duplicate platform profile: ${p.url}`);
+  for (const p of validated) {
+    const key = `${p.platform}:${p.normalizedHandle}`;
+    if (seen.has(key)) throw new Error(`Duplicate profile for @${p.handle}.`);
+    seen.add(key);
+  }
+
+  for (const p of validated) {
+    const dup = await findDuplicateProfile(p.url, p.platform, creatorId);
+    if (dup) {
+      throw new Error(
+        `@${p.handle} on ${p.platform} is already linked to ${dup.creator.name}. Check your entry.`,
+      );
     }
+  }
+
+  const hasMarkedPrimary = validated.some((p) => p.isPrimary);
+  const profiles = validated.map((p, i) => ({ ...p, isPrimary: p.isPrimary ?? (hasMarkedPrimary ? false : i === 0) }));
+
+  await tx.platformProfile.deleteMany({ where: { creatorId } });
+  await tx.platformProfile.createMany({
+    data: profiles.map((p) => ({
+      creatorId,
+      url: p.url,
+      platform: p.platform,
+      isPrimary: p.isPrimary,
+      handle: p.handle,
+      normalizedHandle: p.normalizedHandle,
+    })),
+  });
+  const primary = await tx.platformProfile.findFirst({ where: { creatorId, isPrimary: true } });
+  if (primary) {
+    await tx.creator.update({ where: { id: creatorId }, data: { primaryProfileId: primary.id } });
+  }
+  return profiles;
+}
+
+/** Compute a creator's E.164 phone from dial-country + local digits (or null). */
+export async function phoneFromInput(
+  phoneCountryId: string | undefined,
+  phoneNumber: string | undefined,
+): Promise<string | null> {
+  if (!phoneNumber || !phoneNumber.replace(/\D/g, "")) return null;
+  if (!phoneCountryId) throw new Error("Pick a country dial code for the phone number.");
+  const country = await prisma.country.findUnique({ where: { id: phoneCountryId } });
+  if (!country) throw new Error("The selected dial-code country is not valid.");
+  return buildE164(country.dialCode, phoneNumber);
+}
+
+export async function createCreator(input: CreateCreatorInput, user: SessionUser) {
+  const [validation] = await Promise.all([validateCreatorInput(input, { isCreate: true })]);
+  const profilesInput: ValidatedProfile[] = input.profiles.map((p) => validateProfileEntry(p));
+
+  // No duplicate handles in the input itself.
+  const seen = new Set<string>();
+  for (const p of profilesInput) {
+    const key = `${p.platform}:${p.normalizedHandle}`;
+    if (seen.has(key)) throw new Error(`Duplicate profile for @${p.handle}.`);
     seen.add(key);
   }
 
   // The first profile is primary unless one is marked primary.
-  const profiles = input.profiles.map((p, i) => ({
-    url: p.url,
-    platform: p.platform ?? detectPlatformFromUrl(p.url),
-    isPrimary: p.isPrimary ?? i === 0,
-  }));
+  const hasMarkedPrimary = profilesInput.some((p) => p.isPrimary);
+  const profiles = profilesInput.map((p, i) => ({ ...p, isPrimary: p.isPrimary ?? (hasMarkedPrimary ? false : i === 0) }));
+
+  const gender = validation.data.gender;
+  if (!gender) throw new Error("Gender is required.");
+
+  // Unique email check.
+  if (validation.data.email) {
+    const dupEmail = await prisma.creator.findUnique({ where: { email: validation.data.email } });
+    if (dupEmail) throw new Error(`A creator with the email ${validation.data.email} already exists.`);
+  }
+  if (validation.data.phone) {
+    const dupPhone = await prisma.creator.findUnique({ where: { phone: validation.data.phone } });
+    if (dupPhone) throw new Error(`A creator with the phone ${validation.data.phone} already exists.`);
+  }
+  for (const p of profiles) {
+    const dup = await findDuplicateProfile(p.url, p.platform);
+    if (dup) {
+      throw new Error(
+        `@${p.handle} on ${p.platform} is already linked to ${dup.creator.name}. Check your entry.`,
+      );
+    }
+  }
+
+  const settings = await import("./settings").then((m) => m.getSettings());
+  const pendingApproval = settings.approvalEnabled && user.roleSlug !== "admin";
 
   const created = await prisma.$transaction(async (tx) => {
     const creator = await tx.creator.create({
       data: {
-        name: input.name.trim(),
-        email: input.email || null,
-        phone: input.phone || null,
-        niche: input.niche || null,
-        city: input.city || null,
-        country: input.country || null,
-        creatorType: input.creatorType || null,
-        followers: parseNumeric(input.followers),
-        engagementRate: parseNumeric(input.engagementRate),
-        notes: input.notes || null,
-        avatarUrl: input.avatarUrl || null,
+        name: validation.data.name,
+        email: validation.data.email,
+        phone: validation.data.phone,
+        niche: validation.data.niche,
+        countryId: validation.data.countryId,
+        cityId: validation.data.cityId,
+        creatorTypeId: validation.data.creatorTypeId,
+        gender,
+        shopifyRegistered: validation.data.shopifyRegistered,
+        followers: validation.data.followers,
+        engagementRate: validation.data.engagementRate,
+        notes: validation.data.notes,
+        avatarUrl: validation.data.avatarUrl,
+        customFields: Object.keys(validation.data.customFields).length ? validation.data.customFields : undefined,
         createdById: user.id,
-        ownerships: {
-          create: { userId: user.id, teamId: user.teamId },
-        },
+        approvalStatus: pendingApproval ? "PENDING" : null,
+        ownerships: pendingApproval
+          ? undefined
+          : { create: { userId: user.id, teamId: user.teamId } },
       },
     });
 
-    const createdProfiles: { url: string; platform: string; isPrimary: boolean; handle: string; normalizedHandle: string }[] = [];
-    for (const p of profiles) {
-      const handle = normalizeHandleFromUrl(p.url);
-      createdProfiles.push({
-        ...p,
-        handle,
-        normalizedHandle: handle,
-        url: p.url.trim(),
-      });
-    }
     await tx.platformProfile.createMany({
-      data: createdProfiles.map((p) => ({
+      data: profiles.map((p) => ({
         creatorId: creator.id,
         url: p.url,
-        platform: p.platform as Platform,
+        platform: p.platform,
         isPrimary: p.isPrimary,
         handle: p.handle,
         normalizedHandle: p.normalizedHandle,
       })),
     });
-    const primary = await tx.platformProfile.findFirst({
-      where: { creatorId: creator.id, isPrimary: true },
-    });
+    const primary = await tx.platformProfile.findFirst({ where: { creatorId: creator.id, isPrimary: true } });
     if (primary) {
       await tx.creator.update({ where: { id: creator.id }, data: { primaryProfileId: primary.id } });
     }
-    return { creator, profiles: createdProfiles };
+    return { creator, profiles };
   });
 
   const profileSummary = created.profiles.map((p) => `@${p.handle}`).join(", ");
   await logActivity({
     creatorId: created.creator.id,
     kind: "SYSTEM",
-    type: "CREATOR_CREATED",
-    summary: "Creator created and assigned to me",
+    type: pendingApproval ? "CREATOR_CREATED" : "CREATOR_CREATED",
+    summary: pendingApproval
+      ? "Creator created — pending Team Manager approval"
+      : "Creator created and assigned to me",
     description: `Platform profiles: ${profileSummary}`,
     authorId: user.id,
   });
@@ -132,10 +475,27 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
     action: "creator.create",
     entityType: "Creator",
     entityId: created.creator.id,
-    detail: `Created ${created.creator.name}`,
+    detail: `Created ${created.creator.name}${pendingApproval ? " (pending approval)" : ""}`,
   });
 
-  return created.creator;
+  if (pendingApproval) {
+    await notifyManagersOfApproval(created.creator.id, user);
+  }
+
+  return { creator: created.creator, pendingApproval };
+}
+
+/** Notify Team Managers (of the requester's team) about a pending creator. */
+async function notifyManagersOfApproval(creatorId: string, requester: SessionUser) {
+  const creator = await prisma.creator.findUnique({ where: { id: creatorId } });
+  if (!creator) return;
+  const { notifyTeamManagerOfTeam } = await import("./notify");
+  await notifyTeamManagerOfTeam(requester.teamId, {
+    type: "SYSTEM",
+    title: "Creator pending approval",
+    body: `${creator.name} was created by ${requester.displayName} and needs your approval.`,
+    link: `/creators?pending=1`,
+  });
 }
 
 export interface CreatorListFilters {
@@ -148,12 +508,45 @@ export interface CreatorListFilters {
   pool?: string;
   overdue?: boolean;
   upcoming?: boolean;
+  pending?: boolean;
+  gender?: string;
+  shopify?: "yes" | "no";
+  country?: string;
+  city?: string;
+  creatorType?: string;
+  custom?: Record<string, string>;
+}
+
+/** Whether a user may see a pending/rejected creator. */
+export function canSeePendingCreator(
+  user: SessionUser,
+  c: { createdById: string | null; createdBy?: { teamId: string | null } | null },
+): boolean {
+  if (user.roleSlug === "admin") return true;
+  if (c.createdById === user.id) return true;
+  if (user.roleSlug === "team-manager") {
+    const requesterTeam = c.createdBy?.teamId;
+    if (requesterTeam && requesterTeam === user.teamId) return true;
+  }
+  return false;
 }
 
 export async function listCreators(user: SessionUser, filters: CreatorListFilters = {}) {
   const { addDays, isBefore } = await import("date-fns");
   const now = new Date();
   const s = await import("./settings").then((m) => m.getSettings());
+
+  const fieldFilters: Prisma.CreatorWhereInput[] = [];
+  if (filters.custom) {
+    for (const [fieldId, value] of Object.entries(filters.custom)) {
+      if (value === "__any__") {
+        fieldFilters.push({ customFields: { path: [fieldId], not: Prisma.DbNull } });
+      } else if (value !== "") {
+        const coercion = await coerceForFilter(fieldId, value);
+        fieldFilters.push({ customFields: { path: [fieldId], equals: coercion } });
+      }
+    }
+  }
 
   const where: Prisma.CreatorWhereInput = {
     deletedAt: null,
@@ -162,6 +555,12 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
     ...(filters.platform ? { profiles: { some: { platform: filters.platform as Platform } } } : {}),
     ...(filters.owner ? { ownerships: { some: { userId: filters.owner } } } : {}),
     ...(filters.stage ? { engagements: { some: { stageId: filters.stage } } } : {}),
+    ...(filters.gender ? { gender: filters.gender } : {}),
+    ...(filters.shopify === "yes" ? { shopifyRegistered: true } : {}),
+    ...(filters.shopify === "no" ? { shopifyRegistered: { equals: false } } : {}),
+    ...(filters.country ? { countryId: filters.country } : {}),
+    ...(filters.city ? { cityId: filters.city } : {}),
+    ...(filters.creatorType ? { creatorTypeId: filters.creatorType } : {}),
     ...(filters.overdue
       ? {
           engagements: {
@@ -185,7 +584,11 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
           },
         }
       : {}),
+    ...(filters.pending
+      ? { approvalStatus: { in: ["PENDING", "REJECTED"] } }
+      : { approvalStatus: null }),
   };
+  if (fieldFilters.length) where.AND = fieldFilters;
 
   const creators = await prisma.creator.findMany({
     where,
@@ -195,11 +598,19 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
       ownerships: { include: { user: true, team: true } },
       engagements: { include: { stage: true, deliverables: true }, orderBy: { createdAt: "desc" } },
       activityLogs: { orderBy: { loggedAt: "desc" }, take: 1 },
+      countryRef: true,
+      cityRef: true,
+      creatorTypeRef: true,
+      createdBy: { include: { team: true } },
     },
     orderBy: { updatedAt: "desc" },
   });
 
   return creators
+    .filter((c) => {
+      if (filters.pending) return canSeePendingCreator(user, c);
+      return true;
+    })
     .filter((c) => {
       if (filters.team === "unassigned") return c.ownerships.length === 0;
       if (!filters.team) return true;
@@ -233,9 +644,18 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
         !owns && !sameTeamOther && !unassigned && c.ownerships.some((o) => o.teamId !== user.teamId);
       const isManager = user.roleSlug === "team-manager";
 
+      const missingGifting = requiredForGiftingMissing({
+        countryId: c.countryId,
+        cityId: c.cityId,
+        creatorTypeId: c.creatorTypeId,
+        phone: c.phone,
+      });
+
       return {
         id: c.id,
         name: c.name,
+        gender: c.gender,
+        shopifyRegistered: c.shopifyRegistered,
         niche: c.niche,
         avatarUrl: c.avatarUrl,
         followers: c.followers,
@@ -243,6 +663,9 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
         platform: c.primaryProfile?.platform ?? c.profiles[0]?.platform ?? null,
         handle: c.primaryProfile?.handle ?? c.profiles[0]?.handle ?? null,
         profileUrl: c.primaryProfile?.url ?? c.profiles[0]?.url ?? null,
+        city: c.cityRef?.name ?? c.city,
+        country: c.countryRef?.name ?? c.country,
+        creatorType: c.creatorTypeRef?.name ?? c.creatorType,
         owners: c.ownerships.map((o) => ({
           id: o.userId,
           name: o.user.displayName,
@@ -270,6 +693,12 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
                 ? "other_team"
                 : "none",
         poolStatus,
+        missingRequiredForGifting: missingGifting,
+        incompleteData: missingGifting.length > 0,
+        approvalStatus: c.approvalStatus,
+        approvalVisible: canSeePendingCreator(user, c),
+        requestedBy: c.createdBy ? { id: c.createdBy.id, name: c.createdBy.displayName, teamId: c.createdBy.teamId } : null,
+        reviewComment: c.reviewComment,
         createdAt: c.createdAt,
       };
     })
@@ -278,6 +707,14 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
       if (filters.pool === "company") return i.poolStatus === "company";
       return true;
     });
+}
+
+async function coerceForFilter(fieldId: string, value: string): Promise<string | number | boolean> {
+  const fields = await listCreatorFields();
+  const field = fields.find((f) => f.id === fieldId);
+  if (!field) return value;
+  const coerced = coerceFieldValue(field, value);
+  return coerced === null ? value : coerced;
 }
 
 export async function listTeamPipeline(user: SessionUser) {

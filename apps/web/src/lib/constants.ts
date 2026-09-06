@@ -137,6 +137,8 @@ export const ACTIVITY_TYPE_LABELS: Record<ActivityType, string> = {
   ENGAGEMENT_COMPLETED: "Engagement completed",
   CREATOR_CREATED: "Creator created",
   CREATOR_UPDATED: "Creator updated",
+  CREATOR_APPROVED: "Creator approved",
+  CREATOR_REJECTED: "Creator rejected",
   REQUEST_CREATED: "Availability request created",
   REQUEST_RESOLVED: "Availability request resolved",
 };
@@ -158,6 +160,8 @@ export const SETTING_KEYS = {
   EXPORT_ENABLED_ROLES: "export.enabledRoles",
   PASSWORD_MIN_LENGTH: "password.minLength",
   PASSWORD_COMPLEXITY: "password.complexity",
+  GENDER_OPTIONS: "creator.genderOptions",
+  APPROVAL_REQUIRED: "approval.requireCreatorApproval",
 } as const;
 
 export interface BrandColor {
@@ -289,7 +293,128 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   [SETTING_KEYS.EXPORT_ENABLED_ROLES]: "[]",
   [SETTING_KEYS.PASSWORD_MIN_LENGTH]: "8",
   [SETTING_KEYS.PASSWORD_COMPLEXITY]: "false",
+  [SETTING_KEYS.GENDER_OPTIONS]: '["Male","Female","Other","Prefer not to say"]',
+  [SETTING_KEYS.APPROVAL_REQUIRED]: "false",
 };
+
+// ---------------------------------------------------------------------------
+// Creator fields (built-in + custom)
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_GENDER_OPTIONS = ["Male", "Female", "Other", "Prefer not to say"];
+
+/** Custom-field types an Admin can pick from; built-in fields use semantic types. */
+export const CREATOR_FIELD_TYPES = {
+  TEXT: "text",
+  TEXTAREA: "textarea",
+  NUMBER: "number",
+  DATE: "date",
+  SELECT: "select",
+  BOOLEAN: "boolean",
+} as const;
+
+export const CUSTOM_FIELD_TYPES = [
+  CREATOR_FIELD_TYPES.TEXT,
+  CREATOR_FIELD_TYPES.TEXTAREA,
+  CREATOR_FIELD_TYPES.NUMBER,
+  CREATOR_FIELD_TYPES.DATE,
+  CREATOR_FIELD_TYPES.SELECT,
+  CREATOR_FIELD_TYPES.BOOLEAN,
+] as const;
+
+export const CREATOR_FIELD_TYPE_LABELS: Record<string, string> = {
+  text: "Short text",
+  textarea: "Long text",
+  number: "Number",
+  date: "Date",
+  select: "Single select",
+  boolean: "Yes / No",
+  email: "Email",
+  phone: "Phone",
+  country: "Country",
+  city: "City",
+  creatorType: "Creator Type",
+  gender: "Gender",
+};
+
+/**
+ * Built-in creator fields. Each maps to a first-class column; `required` is
+ * toggled by the Admin in Settings (Name and Platform Profiles are always
+ * required and are not listed here).
+ */
+export const SYSTEM_FIELD_DEFINITIONS: {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  order: number;
+}[] = [
+  { key: "email", label: "Email", type: "email", required: false, order: 1 },
+  { key: "phone", label: "Phone", type: "phone", required: false, order: 2 },
+  { key: "gender", label: "Gender", type: "gender", required: true, order: 3 },
+  { key: "country", label: "Country", type: "country", required: false, order: 4 },
+  { key: "city", label: "City", type: "city", required: false, order: 5 },
+  { key: "creatorType", label: "Creator Type", type: "creatorType", required: false, order: 6 },
+  { key: "niche", label: "Niche", type: "text", required: false, order: 7 },
+  { key: "followers", label: "Followers", type: "number", required: false, order: 8 },
+  { key: "engagementRate", label: "Engagement rate (%)", type: "number", required: false, order: 9 },
+  { key: "shopifyRegistered", label: "Registered on Shopify", type: "boolean", required: false, order: 10 },
+  { key: "notes", label: "Notes", type: "textarea", required: false, order: 11 },
+  { key: "avatarUrl", label: "Avatar URL", type: "text", required: false, order: 12 },
+];
+
+/**
+ * Fields that must be populated before a Gift may be requested for a Creator
+ * (the "Required for Gifting" set). Fixed — not admin-configurable.
+ */
+export const REQUIRED_FOR_GIFTING_FIELD_KEYS = ["country", "city", "creatorType", "phone"] as const;
+
+export const REQUIRED_FOR_GIFTING_LABELS: Record<string, string> = {
+  country: "Country",
+  city: "City",
+  creatorType: "Creator Type",
+  phone: "Phone",
+};
+
+export function requiredForGiftingMissing(c: {
+  countryId: string | null;
+  cityId: string | null;
+  creatorTypeId: string | null;
+  phone: string | null;
+}): string[] {
+  const missing: string[] = [];
+  if (!c.countryId) missing.push("country");
+  if (!c.cityId) missing.push("city");
+  if (!c.creatorTypeId) missing.push("creatorType");
+  if (!c.phone) missing.push("phone");
+  return missing;
+}
+
+// ---------------------------------------------------------------------------
+// Platform + profile input helpers
+// ---------------------------------------------------------------------------
+
+export const PLATFORM_HANDLE_BASE: Record<string, string> = {
+  INSTAGRAM: "instagram.com",
+  TIKTOK: "tiktok.com",
+  YOUTUBE: "youtube.com",
+  X: "x.com",
+  SNAPCHAT: "snapchat.com",
+  FACEBOOK: "facebook.com",
+  LINKEDIN: "linkedin.com",
+  TWITCH: "twitch.tv",
+};
+
+/** Build the canonical profile URL for a platform + bare handle. */
+export function canonicalProfileUrl(platform: string, handle: string): string {
+  const base = PLATFORM_HANDLE_BASE[platform];
+  if (!base) return handle;
+  if (platform === "TIKTOK" || platform === "SNAPCHAT" || platform === "YOUTUBE") {
+    return `https://${base}/@${handle}`;
+  }
+  if (platform === "LINKEDIN") return `https://${base}/in/${handle}`;
+  return `https://${base}/${handle}`;
+}
 
 export function normalizeHandleFromUrl(rawUrl: string): string {
   const withoutProtocol = rawUrl.trim().replace(/^https?:\/\//i, "");
@@ -310,4 +435,53 @@ export function detectPlatformFromUrl(rawUrl: string): Platform {
   if (url.includes("linkedin.com")) return "LINKEDIN";
   if (url.includes("twitch.tv")) return "TWITCH";
   return "OTHER";
+}
+
+/** True when the entry looks like a real social link rather than a bare handle. */
+export function looksLikeUrl(input: string): boolean {
+  return /[./]/.test(input);
+}
+
+/**
+ * Extract the canonical Platform Handle from tolerant user input: a bare
+ * handle, an `@`-prefixed handle, or a full link (`https://www.instagram.com/mohamedismail`).
+ * Returns null when the input is invalid (bare handle containing spaces or slashes).
+ */
+export function handleFromInput(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  if (!looksLikeUrl(trimmed)) {
+    const cleaned = trimmed.replace(/^@+/, "").trim();
+    if (/[\s/]/.test(cleaned)) return null;
+    return cleaned.toLowerCase();
+  }
+  return normalizeHandleFromUrl(trimmed);
+}
+
+/** Detect a conflicting platform when a link was pasted; null when not detectable. */
+export function urlPlatformMismatch(input: string, selected: Platform): Platform | null {
+  if (!looksLikeUrl(input)) return null;
+  const detected = detectPlatformFromUrl(input);
+  if (detected === "OTHER" || detected === selected) return null;
+  return detected;
+}
+
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/** Strip non-digit characters from a phone input. */
+export function digitsOnly(value: string): string {
+  return value.replace(/[^\d]/g, "");
+}
+
+/** Build an E.164 phone (`+201001234567`) from a dial code and local digits. */
+export function buildE164(dialCode: string, localDigits: string): string {
+  let d = digitsOnly(localDigits);
+  if (d.startsWith("0")) d = d.slice(1);
+  return `+${dialCode.replace(/^\+/, "")}${d}`;
+}
+
+export function isValidE164(phone: string): boolean {
+  return /^\+\d{8,15}$/.test(phone);
 }

@@ -13,7 +13,7 @@ A social account belonging to a **Creator** on a specific platform (e.g., Instag
 _Avoid_: Channel, page, account
 
 **Platform Handle**:
-The canonical username extracted from a **Platform Profile** link after normalizing the URL (stripping protocol, `www.`, trailing slashes, and query parameters).
+The canonical username of a **Platform Profile**, derived from what the user enters: a bare handle (`mohamedismail`), an `@`-prefixed handle, or a full link (`https://www.instagram.com/mohamedismail`) — after stripping the protocol, `www.`, trailing slashes, query parameters, and lowercasing. Stored once and unique per platform across all **Creators**.
 _Avoid_: URL, link, username
 
 **Primary Platform Profile**:
@@ -89,12 +89,49 @@ _Avoid_: static, non-clickable metrics
 A URL that opens a list page with filters applied, used by the **Dashboard** to let a user drill into an insight in one click. **Creators** respects `stage`, `owner`, `pool`, `q`, `team`, `overdue=1`, and `upcoming=1`; **Gifting** respects `tab=pending|warehouse|history`. Filters initialize from the URL so the link produces the matching list.
 _Avoid_: query string that the page ignores
 
+**Country**:
+Workspace reference data managed by the **Admin** that a **Creator's** location is selected from. A **Country** records a name and a phone dial code used to build a **Creator's** phone number.
+_Avoid_: Region, territory
+
+**City**:
+Workspace reference data managed by the **Admin**, belonging to exactly one **Country**. A **Creator's** **City** is chosen after picking their **Country**, using the **Country's** phone dial code for the **Creator's** phone number.
+_Avoid_: Governorate (keep as a data value, not a distinct level)
+
+**Creator Type**:
+Workspace reference data managed by the **Admin** (e.g., Blogger, Podcaster, YouTuber) that classifies a **Creator**. Selected from a dropdown maintained by the **Admin**; may be marked required.
+_Avoid_: Category, segment
+
+**Custom Field**:
+An additional, **Admin**-configured attribute that may be attached to a **Creator** beyond the built-in fields. Each **Custom Field** has a label, a data type, and an optional required flag. Values are entered on the **Creator** record and can be filtered on.
+_Avoid_: Extra field, dynamic attribute
+
+**Required for Gifting**:
+The set of **Creator** fields that must be populated before a **Gift** may be **Requested** for that **Creator**: **Country**, **City**, **Creator Type**, and **Phone**. A **Creator** missing any of these is flagged with an **Incomplete Data** indicator visible to its **Owner** (badge on the card and list row, callout on the profile), and the **Gift** request is a hard stop naming the missing fields.
+_Avoid_: Mandatory data, required profile
+
+**Incomplete Data**:
+The state of a **Creator** that is missing one or more **Required for Gifting** fields. Surfaced to the **Owner** as a badge on the card, list row, and a callout on the profile so the record can be completed before gifting.
+_Avoid_: Missing info, incomplete profile
+
+**Gender**:
+A built-in single-select attribute on a **Creator** that must always be assigned when the **Creator** is added. The selectable options (e.g., Male, Female, Other, Prefer not to say) are maintained by the **Admin** in **Workspace Settings**; the field itself is always present and cannot be removed.
+
+**Creator Approval**:
+An optional workflow controlled by the **Admin** in **Workspace Settings**: when enabled, a **Creator** created by a non-admin **User** is held in a **Pending Approval** state until that user's **Team Manager** approves it or rejects it with a reason. Pending **Creators** are visible only to the requester, their **Team Manager**, and the **Admin**, carry a "Pending approval" badge, and cannot be worked (no **Activity**, stage moves, **Engagements**, or **Gifts**) until approved. On rejection, the requester can edit and resubmit.
+_Avoid_: vetting, moderation
+
 ## Relationships
 
 - A **Creator** has one **Primary Platform Profile** and zero or more additional **Platform Profiles**
 - A **Platform Profile** belongs to exactly one **Creator**
 - A **Platform Handle** is unique per platform across all **Creators**
+- A **Creator**'s **Phone** is unique across all **Creators** (one per Creator)
+- A **Creator**'s **Email**, when provided, must be a valid email address and is unique across all **Creators**
 - A **Creator** is assigned to one or more **Owners** and belongs to one or more **Teams**, governed by the **Ownership Policy**
+- A **Creator** is classified by zero or one **Creator Type** and located in at most one **City**, which belongs to exactly one **Country**
+- A **City** belongs to exactly one **Country**
+- A **Creator** may carry zero or more **Custom Field** values, one per configured field
+- A **Creator** missing any **Required for Gifting** field is in an **Incomplete Data** state, surfaced to its **Owner** and a hard stop on **Gift** requests
 - A **Team** has one or more system users
 - A **Dashboard** is role-aware: **Warehouse** sees gifting throughput; other roles see creator workload plus gifting
 - A **Dashboard** insight is a **Deep Link**-driven interaction: click to navigate to a pre-filtered list, or expand inline details

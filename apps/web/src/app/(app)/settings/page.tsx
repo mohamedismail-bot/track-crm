@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Pencil, Plus, Save, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Save, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -37,7 +38,25 @@ interface SettingsData {
   exportEnabledRoles: string[];
   passwordMinLength: number;
   passwordComplexity: boolean;
+  genderOptions: string[];
+  approvalEnabled: boolean;
   stages: { id: string; name: string; isCompleted: boolean }[];
+}
+
+interface RefField {
+  id: string | null;
+  key: string | null;
+  label: string;
+  type: string;
+  required: boolean;
+  order: number;
+  options: string[];
+}
+
+interface ReferenceData {
+  countries: { id: string; name: string; dialCode: string; cities: { id: string; name: string }[] }[];
+  creatorTypes: { id: string; name: string }[];
+  fields: RefField[];
 }
 
 interface TeamRow {
@@ -64,11 +83,25 @@ export default function SettingsPage() {
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
+  const [refData, setRefData] = React.useState<ReferenceData | null>(null);
+
   React.useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
       .then(setData)
       .catch(() => setData(null));
+    fetch("/api/reference")
+      .then((r) => r.json())
+      .then(setRefData)
+      .catch(() => setRefData(null));
+  }, []);
+
+  const loadReference = React.useCallback(async () => {
+    const res = await fetch("/api/reference");
+    if (!res.ok) return;
+    const d = await res.json();
+    setRefData({ countries: d.countries ?? [], creatorTypes: d.creatorTypes ?? [], fields: d.fields ?? [] });
+    setData((prev) => (prev ? { ...prev, genderOptions: d.genderOptions ?? prev.genderOptions, approvalEnabled: d.approvalEnabled ?? prev.approvalEnabled } : prev));
   }, []);
 
   const loadTeams = React.useCallback(async () => {
@@ -88,7 +121,8 @@ export default function SettingsPage() {
 
   React.useEffect(() => {
     void loadTeams();
-  }, [loadTeams]);
+    void loadReference();
+  }, [loadTeams, loadReference]);
 
   if (!data) {
     return (
@@ -114,6 +148,8 @@ export default function SettingsPage() {
       fd.append("giftMinStageId", data.giftMinStageId ?? "");
       fd.append("passwordMinLength", String(data.passwordMinLength));
       fd.append("passwordComplexity", data.passwordComplexity ? "true" : "false");
+      fd.append("genderOptions", JSON.stringify(data.genderOptions));
+      fd.append("approvalEnabled", data.approvalEnabled ? "true" : "false");
       if (logoFile) {
         fd.append("logo", logoFile);
       } else if (removeLogo) {
@@ -414,6 +450,109 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Creator approval</CardTitle>
+          <CardDescription>
+            Approval flow and the gender choices offered when a creator is added.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Toggle
+            label="Require Team Manager approval for new creators"
+            checked={data.approvalEnabled}
+            onChange={(v) => set("approvalEnabled", v)}
+          />
+          <div className="space-y-2">
+            <Label>Gender options</Label>
+            <div className="flex flex-wrap gap-2">
+              {data.genderOptions.map((g, i) => (
+                <span
+                  key={`${g}-${i}`}
+                  className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-sm"
+                >
+                  {g}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${g}`}
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() =>
+                      set(
+                        "genderOptions",
+                        data.genderOptions.filter((_, j) => j !== i),
+                      )
+                    }
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                id="new-gender"
+                placeholder="Add an option (e.g. Male)"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const v = (e.target as HTMLInputElement).value.trim();
+                    if (v && !data.genderOptions.includes(v)) set("genderOptions", [...data.genderOptions, v]);
+                    (e.target as HTMLInputElement).value = "";
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const input = document.getElementById("new-gender") as HTMLInputElement | null;
+                  const v = input?.value.trim() ?? "";
+                  if (v && !data.genderOptions.includes(v)) set("genderOptions", [...data.genderOptions, v]);
+                  if (input) input.value = "";
+                }}
+              >
+                <Plus className="mr-1 h-4 w-4" /> Add
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              At least one option is required. Changes save with the main Save button.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Creator fields</CardTitle>
+          <CardDescription>
+            Which fields appear on a creator record, whether they are mandatory, and any
+            custom fields beyond the built-ins.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <FieldList
+            refData={refData}
+            onChanged={loadReference}
+            onToast={(title, variant) => toast({ title, variant })}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Reference data</CardTitle>
+          <CardDescription>
+            Countries (with phone dial codes and cities) and creator types used when
+            building creator records. Entries in use cannot be deleted.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <RefList
+            refData={refData}
+            onChanged={loadReference}
+            onToast={(title, variant) => toast({ title, variant })}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Ownership policy</CardTitle>
           <CardDescription>Who may work a single creator.</CardDescription>
         </CardHeader>
@@ -554,5 +693,478 @@ function Toggle({
         />
       </span>
     </button>
+  );
+}
+
+const FIELD_TYPES: { value: string; label: string }[] = [
+  { value: "text", label: "Short text" },
+  { value: "textarea", label: "Long text" },
+  { value: "number", label: "Number" },
+  { value: "date", label: "Date" },
+  { value: "select", label: "Single select" },
+  { value: "boolean", label: "Yes / No" },
+];
+
+function patchRef({ kind, id, body }: { kind: string; id: string; body: Record<string, unknown> }) {
+  return fetch(`/api/reference/${id}?kind=${kind}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(async (res) => ({ ok: res.ok, error: res.ok ? "" : (await res.json()).error }));
+}
+
+function deleteRef({ kind, id }: { kind: string; id: string }) {
+  return fetch(`/api/reference/${id}?kind=${kind}`, { method: "DELETE" }).then(async (res) => ({
+    ok: res.ok,
+    error: res.ok ? "" : (await res.json()).error,
+  }));
+}
+
+function FieldList({
+  refData,
+  onChanged,
+  onToast,
+}: {
+  refData: ReferenceData | null;
+  onChanged: () => Promise<void>;
+  onToast: (title: string, variant?: "default" | "destructive" | "success") => void;
+}) {
+  const fields = refData?.fields ?? [];
+  const orderable = fields.filter((f) => f.id != null);
+
+  const [newLabel, setNewLabel] = React.useState("");
+  const [newType, setNewType] = React.useState("text");
+  const [newOptions, setNewOptions] = React.useState("");
+  const [drafts, setDrafts] = React.useState<Record<string, { label: string; options: string }>>({});
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  const patch = async (f: RefField, body: Record<string, unknown>) => {
+    if (!f.id) return;
+    setBusyId(f.id);
+    const r = await patchRef({ kind: "field", id: f.id, body });
+    if (!r.ok) onToast(r.error || "Could not update field", "destructive");
+    else {
+      onToast("Field updated", "success");
+      await onChanged();
+    }
+    setBusyId(null);
+  };
+
+  const move = async (idx: number, dir: -1 | 1) => {
+    const target = orderable[idx + dir];
+    const from = orderable[idx];
+    if (!from.id || !target.id) return;
+    const a = from.order;
+    const b = target.order;
+    await patchRef({ kind: "field", id: from.id, body: { order: b } });
+    await patchRef({ kind: "field", id: target.id, body: { order: a } });
+    await onChanged();
+  };
+
+  const addCustom = async () => {
+    const label = newLabel.trim();
+    if (!label) return onToast("A label is required", "destructive");
+    const options = newType === "select" ? newOptions.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    if (newType === "select" && options.length === 0) return onToast("Select fields need at least one option", "destructive");
+    const res = await fetch("/api/reference", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "field", label, type: newType, options }),
+    });
+    const j = await res.json();
+    if (!res.ok) return onToast(j.error ?? "Could not add field", "destructive");
+    onToast("Field added", "success");
+    setNewLabel("");
+    setNewOptions("");
+    setNewType("text");
+    await onChanged();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="divide-y rounded-lg border">
+        {fields.map((f, i) => {
+          const draft = drafts[f.id ?? f.label] ?? { label: f.label, options: f.options.join(", ") };
+          const isSystem = f.id != null && fields.some((x) => x.id === f.id && x.key != null);
+          const isCustom = f.id != null && !isSystem;
+          const locked = f.key === "name" || f.key === "gender" || f.id == null;
+          return (
+            <div key={f.id ?? f.key ?? f.label} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+              {isCustom ? (
+                <Input
+                  className="w-44"
+                  value={draft.label}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [f.id as string]: { ...(d[f.id as string] ?? { options: f.options.join(", ") }), label: e.target.value } }))}
+                  onBlur={() => {
+                    const v = draft.label.trim();
+                    if (v && v !== f.label) void patch(f, { label: v });
+                  }}
+                />
+              ) : (
+                <span className="w-44 truncate text-sm font-medium">
+                  {f.label}
+                  {f.id == null ? <span className="ml-1 text-xs font-normal text-muted-foreground">built-in</span> : null}
+                </span>
+              )}
+              {isCustom ? (
+                <Select value={f.type} onValueChange={(t) => void patch(f, { type: t })}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FIELD_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span className="w-36 text-xs text-muted-foreground">
+                  {FIELD_TYPES.find((t) => t.value === f.type)?.label ?? f.type}
+                </span>
+              )}
+              {isCustom && f.type === "select" ? (
+                <Input
+                  className="w-56"
+                  placeholder="Options, comma separated"
+                  value={draft.options}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [f.id as string]: { ...(d[f.id as string] ?? { label: f.label }), options: e.target.value } }))}
+                  onBlur={() => {
+                    const v = draft.options.split(",").map((s) => s.trim()).filter(Boolean);
+                    if (v.length && v.join(", ") !== f.options.join(", ")) void patch(f, { options: v });
+                  }}
+                />
+              ) : null}
+              {locked ? (
+                <span className="ml-auto px-2 text-xs text-muted-foreground">
+                  {f.key === "gender" ? "always required" : "always on"}
+                </span>
+              ) : (
+                <Toggle
+                  label="Required"
+                  checked={f.required}
+                  onChange={(v) => void patch(f, { required: v })}
+                />
+              )}
+              {isCustom ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Delete field"
+                  disabled={busyId === f.id}
+                  onClick={async () => {
+                    const r = await deleteRef({ kind: "field", id: f.id as string });
+                    if (!r.ok) onToast(r.error || "Could not delete field", "destructive");
+                    else {
+                      onToast("Field deleted", "success");
+                      await onChanged();
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              ) : null}
+              <div className="flex items-center">
+                <Button size="icon" variant="ghost" aria-label="Move up" disabled={i === 0} onClick={() => void move(i, -1)}>
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="ghost" aria-label="Move down" disabled={i === fields.length - 1} onClick={() => void move(i, 1)}>
+                  <ArrowDown className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border p-3">
+        <Input className="w-44" placeholder="New field label" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
+        <Select value={newType} onValueChange={setNewType}>
+          <SelectTrigger className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {FIELD_TYPES.map((t) => (
+              <SelectItem key={t.value} value={t.value}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {newType === "select" ? (
+          <Input className="w-56" placeholder="Options, comma separated" value={newOptions} onChange={(e) => setNewOptions(e.target.value)} />
+        ) : null}
+        <Button onClick={() => void addCustom()}>
+          <Plus className="mr-1 h-4 w-4" /> Add field
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RefList({
+  refData,
+  onChanged,
+  onToast,
+}: {
+  refData: ReferenceData | null;
+  onChanged: () => Promise<void>;
+  onToast: (title: string, variant?: "default" | "destructive" | "success") => void;
+}) {
+  const countries = refData?.countries ?? [];
+  const creatorTypes = refData?.creatorTypes ?? [];
+
+  const [newCountry, setNewCountry] = React.useState("");
+  const [newDial, setNewDial] = React.useState("");
+  const [newCity, setNewCity] = React.useState("");
+  const [newType, setNewType] = React.useState("");
+  const [cityFor, setCityFor] = React.useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = React.useState<{ kind: string; id: string; label: string } | null>(null);
+  const [rename, setRename] = React.useState<{ kind: string; id: string; value: string; dial?: string } | null>(null);
+
+  const busy = confirmDelete != null || rename != null;
+
+  const addCountry = async () => {
+    const name = newCountry.trim();
+    const dial = newDial.trim().replace(/^\+/, "");
+    if (!name) return onToast("Country name is required", "destructive");
+    if (!/^\d{1,4}$/.test(dial)) return onToast("Dial code must be 1–4 digits", "destructive");
+    const res = await fetch("/api/reference", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "country", name, dialCode: dial }),
+    });
+    const j = await res.json();
+    if (!res.ok) return onToast(j.error ?? "Could not add country", "destructive");
+    setNewCountry("");
+    setNewDial("");
+    onToast("Country added", "success");
+    await onChanged();
+  };
+
+  const addCity = async (countryId: string) => {
+    const name = newCity.trim();
+    if (!name) return onToast("City name is required", "destructive");
+    const res = await fetch("/api/reference", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "city", name, countryId }),
+    });
+    const j = await res.json();
+    if (!res.ok) return onToast(j.error ?? "Could not add city", "destructive");
+    setNewCity("");
+    onToast("City added", "success");
+    await onChanged();
+  };
+
+  const addType = async () => {
+    const name = newType.trim();
+    if (!name) return onToast("Creator type name is required", "destructive");
+    const res = await fetch("/api/reference", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "creatorType", name }),
+    });
+    const j = await res.json();
+    if (!res.ok) return onToast(j.error ?? "Could not add creator type", "destructive");
+    setNewType("");
+    onToast("Creator type added", "success");
+    await onChanged();
+  };
+
+  const doDelete = async () => {
+    if (!confirmDelete) return;
+    const r = await deleteRef({ kind: confirmDelete.kind, id: confirmDelete.id });
+    if (!r.ok) onToast(r.error || "Could not delete", "destructive");
+    else {
+      onToast("Deleted", "success");
+      setConfirmDelete(null);
+      await onChanged();
+    }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Countries</p>
+        </div>
+        <div className="divide-y rounded-lg border">
+          {countries.map((c) => (
+            <div key={c.id} className="px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                {rename?.kind === "country" && rename.id === c.id ? (
+                  <>
+                    <Input
+                      autoFocus
+                      className="w-40"
+                      value={rename.value}
+                      onChange={(e) => setRename({ ...rename, value: e.target.value })}
+                    />
+                    <Input
+                      className="w-24"
+                      value={rename.dial ?? ""}
+                      onChange={(e) => setRename({ ...rename, dial: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={async () => {
+                        const body: Record<string, string> = { name: rename.value };
+                        if (rename.dial !== undefined) body.dialCode = rename.dial.replace(/^\+/, "");
+                        const r = await patchRef({ kind: "country", id: c.id, body });
+                        if (!r.ok) onToast(r.error || "Could not rename", "destructive");
+                        else {
+                          onToast("Country updated", "success");
+                          setRename(null);
+                          await onChanged();
+                        }
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRename(null)}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.name}</span>
+                    <Badge variant="outline">+{c.dialCode.replace(/^\+/, "")}</Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setRename({ kind: "country", id: c.id, value: c.name, dial: c.dialCode.replace(/^\+/, "") })}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmDelete({ kind: "country", id: c.id, label: c.name })}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => (cityFor === c.id ? setCityFor(null) : setCityFor(c.id))} disabled={busy}>
+                      {cityFor === c.id ? "Hide cities" : `${c.cities.length} cities`}
+                    </Button>
+                  </>
+                )}
+              </div>
+              {cityFor === c.id ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 pb-1">
+                  <Input className="w-48" placeholder="New city name" value={newCity} onChange={(e) => setNewCity(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void addCity(c.id)} />
+                  <Button size="sm" variant="outline" onClick={() => void addCity(c.id)}>
+                    <Plus className="mr-1 h-4 w-4" /> Add city
+                  </Button>
+                  <div className="flex w-full flex-wrap gap-1.5">
+                    {c.cities.map((city) => (
+                      <span key={city.id} className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs">
+                        {city.name}
+                        <button
+                          type="button"
+                          aria-label={`Delete ${city.name}`}
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={async () => {
+                            const r = await deleteRef({ kind: "city", id: city.id });
+                            if (!r.ok) onToast(r.error || "Could not delete city", "destructive");
+                            else {
+                              onToast("City deleted", "success");
+                              await onChanged();
+                            }
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {countries.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">No countries yet. Add the first one below.</p> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input className="w-40" placeholder="Country name" value={newCountry} onChange={(e) => setNewCountry(e.target.value)} />
+          <Input className="w-24" placeholder="+20" value={newDial} onChange={(e) => setNewDial(e.target.value)} />
+          <Button onClick={() => void addCountry()}>
+            <Plus className="mr-1 h-4 w-4" /> Add country
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-medium">Creator types</p>
+        <div className="divide-y rounded-lg border">
+          {creatorTypes.map((t) => (
+            <div key={t.id} className="flex items-center gap-2 px-3 py-2.5">
+              {rename?.kind === "creatorType" && rename.id === t.id ? (
+                <>
+                  <Input
+                    autoFocus
+                    className="flex-1"
+                    value={rename.value}
+                    onChange={(e) => setRename({ ...rename, value: e.target.value })}
+                  />
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={async () => {
+                      const r = await patchRef({ kind: "creatorType", id: t.id, body: { name: rename.value } });
+                      if (!r.ok) onToast(r.error || "Could not rename", "destructive");
+                      else {
+                        onToast("Creator type updated", "success");
+                        setRename(null);
+                        await onChanged();
+                      }
+                    }}
+                  >
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRename(null)}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</span>
+                  <Button size="sm" variant="ghost" onClick={() => setRename({ kind: "creatorType", id: t.id, value: t.name })}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDelete({ kind: "creatorType", id: t.id, label: t.name })}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            </div>
+          ))}
+          {creatorTypes.length === 0 ? <p className="px-3 py-4 text-sm text-muted-foreground">No creator types yet.</p> : null}
+        </div>
+        <div className="flex gap-2">
+          <Input placeholder="New creator type" value={newType} onChange={(e) => setNewType(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void addType()} />
+          <Button onClick={() => void addType()}>
+            <Plus className="mr-1 h-4 w-4" /> Add type
+          </Button>
+        </div>
+      </div>
+
+      {confirmDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Delete {confirmDelete.label}?</CardTitle>
+              <CardDescription>
+                This cannot be undone. Entries that are in use cannot be deleted.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void doDelete()}>
+                Delete
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+    </div>
   );
 }

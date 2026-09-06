@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createCreator, findDuplicateProfile, listCreators } from "@/lib/creators";
+import { createCreator, listCreators } from "@/lib/creators";
 import { jsonError, requireApiUser } from "@/lib/api-utils";
 import type { SessionUser } from "@/lib/auth";
 
@@ -9,6 +9,14 @@ export async function GET(req: NextRequest) {
   const session = user as SessionUser;
 
   const params = req.nextUrl.searchParams;
+  const custom: Record<string, string> = {};
+  for (const key of params.keys()) {
+    if (key.startsWith("cf_")) custom[key.slice(3)] = params.get(key) ?? "";
+  }
+
+  const shopifyParam = params.get("shopify");
+  const shopify = shopifyParam === "yes" || shopifyParam === "no" ? shopifyParam : undefined;
+
   const items = await listCreators(session, {
     team: params.get("team") ?? "",
     stage: params.get("stage") ?? "",
@@ -19,6 +27,13 @@ export async function GET(req: NextRequest) {
     pool: params.get("pool") ?? "",
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
+    pending: params.get("pending") === "1",
+    gender: params.get("gender") ?? "",
+    shopify,
+    country: params.get("country") ?? "",
+    city: params.get("city") ?? "",
+    creatorType: params.get("creatorType") ?? "",
+    custom,
   });
 
   return NextResponse.json(items);
@@ -35,22 +50,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    for (const p of body.profiles ?? []) {
-      const dup = await findDuplicateProfile(p.url, p.platform);
-      if (dup) {
-        const owner = dup.creator.ownerships[0];
-        return NextResponse.json(
-          {
-            error: `This profile already exists - assigned to ${dup.creator.name}${
-              owner ? ` from ${owner.team.name}` : ""
-            }`,
-          },
-          { status: 409 },
-        );
-      }
-    }
-    const creator = await createCreator(body, session);
-    return NextResponse.json({ id: creator.id, name: creator.name }, { status: 201 });
+    const result = await createCreator(body, session);
+    return NextResponse.json(
+      { id: result.creator.id, name: result.creator.name, pendingApproval: result.pendingApproval },
+      { status: 201 },
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to create creator";
     return jsonError(msg, 400);

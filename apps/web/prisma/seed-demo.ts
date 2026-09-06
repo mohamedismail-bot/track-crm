@@ -59,6 +59,47 @@ async function main() {
   const karimId = karim.id;
 
   // -------------------------------------------------------------------------
+  // Reference data (countries → cities, creator types)
+  // -------------------------------------------------------------------------
+
+  const REF_COUNTRIES: { name: string; dialCode: string; cities: string[] }[] = [
+    { name: "Egypt", dialCode: "+20", cities: ["Cairo", "Alexandria", "Giza", "Mansoura"] },
+    { name: "Saudi Arabia", dialCode: "+966", cities: ["Riyadh", "Jeddah"] },
+    { name: "United Arab Emirates", dialCode: "+971", cities: ["Dubai", "Abu Dhabi"] },
+  ];
+
+  const countryIdByCity = new Map<string, string>();
+  const countryIdByName = new Map<string, string>();
+  const cityIdByName = new Map<string, string>();
+  for (const ref of REF_COUNTRIES) {
+    const country = await prisma.country.upsert({
+      where: { name: ref.name },
+      update: { dialCode: ref.dialCode },
+      create: { name: ref.name, dialCode: ref.dialCode },
+    });
+    countryIdByName.set(ref.name, country.id);
+    for (const cityName of ref.cities) {
+      const city = await prisma.city.upsert({
+        where: { countryId_name: { countryId: country.id, name: cityName } },
+        update: {},
+        create: { name: cityName, countryId: country.id },
+      });
+      countryIdByCity.set(cityName, country.id);
+      cityIdByName.set(cityName, city.id);
+    }
+  }
+
+  const creatorTypeIdByName = new Map<string, string>();
+  for (const name of ["Blogger", "Podcaster", "YouTuber", "Micro-influencer", "Fashion blogger"]) {
+    const t = await prisma.creatorType.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+    creatorTypeIdByName.set(name, t.id);
+  }
+
+  // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
 
@@ -73,6 +114,9 @@ async function main() {
       engRate?: number;
       city?: string;
       country?: string;
+      gender?: string;
+      phone?: string;
+      creatorType?: string;
     },
   ): Promise<{ id: string; name: string } | null> {
     const existing = await prisma.platformProfile.findUnique({
@@ -88,6 +132,13 @@ async function main() {
         engagementRate: creator.engRate,
         city: creator.city,
         country: creator.country,
+        gender: creator.gender,
+        phone: creator.phone,
+        countryId:
+          (creator.city ? countryIdByCity.get(creator.city) : null) ??
+          (creator.country ? countryIdByName.get(creator.country) ?? null : null),
+        cityId: creator.city ? (cityIdByName.get(creator.city) ?? null) : null,
+        creatorTypeId: creator.creatorType ? (creatorTypeIdByName.get(creator.creatorType) ?? null) : null,
         createdById: adminId,
         profiles: {
           create: {
@@ -276,13 +327,13 @@ async function main() {
   const commissionTeam = await prisma.team.findUnique({ where: { slug: "commission" } });
   if (!budgetTeam || !commissionTeam) throw new Error("Teams missing — run `prisma db seed` first.");
 
-  const cLayla = await ensureCreator(lina, { name: "Layla Mansour", niche: "Fitness", platform: Platform.INSTAGRAM, handle: "layla.mansour", followers: 128000, engRate: 5.8, city: "Cairo", country: "Egypt" });
-  const cOmar = await ensureCreator(lina, { name: "Omar Hakim", niche: "Gaming", platform: Platform.TIKTOK, handle: "omarhakim", followers: 640000, engRate: 4.6, city: "Alexandria", country: "Egypt" });
-  const cFarida = await ensureCreator(lina, { name: "Farida Adel", niche: "Fashion", platform: Platform.INSTAGRAM, handle: "farida.adel", followers: 415000, engRate: 6.7, city: "Cairo", country: "Egypt" });
-  const cHana = await ensureCreator(lina, { name: "Hana Khatib", niche: "Family", platform: Platform.INSTAGRAM, handle: "hana.khatib", followers: 223000, engRate: 4.9, city: "Giza", country: "Egypt" });
-  const cDina = await ensureCreator(lina, { name: "Dina Fawzy", niche: "Beauty", platform: Platform.INSTAGRAM, handle: "dina.fawzy", followers: 531000, engRate: 8.2, city: "Cairo", country: "Egypt" });
-  const cTarek = await ensureCreator(lina, { name: "Tarek Omar", niche: "Automotive", platform: Platform.YOUTUBE, handle: "tarek.omar", followers: 178000, engRate: 3.2, city: "Mansoura", country: "Egypt" });
-  const cSalma = await ensureCreator(maya, { name: "Salma Yehia", niche: "Fashion", platform: Platform.INSTAGRAM, handle: "salma.yehia", followers: 684000, engRate: 6.1, city: "Cairo", country: "Egypt" });
+  const cLayla = await ensureCreator(lina, { name: "Layla Mansour", niche: "Fitness", platform: Platform.INSTAGRAM, handle: "layla.mansour", followers: 128000, engRate: 5.8, city: "Cairo", country: "Egypt", gender: "Female", phone: "+201001234001", creatorType: "Blogger" });
+  const cOmar = await ensureCreator(lina, { name: "Omar Hakim", niche: "Gaming", platform: Platform.TIKTOK, handle: "omarhakim", followers: 640000, engRate: 4.6, city: "Alexandria", country: "Egypt", gender: "Male", phone: "+201001234002", creatorType: "Micro-influencer" });
+  const cFarida = await ensureCreator(lina, { name: "Farida Adel", niche: "Fashion", platform: Platform.INSTAGRAM, handle: "farida.adel", followers: 415000, engRate: 6.7, city: "Cairo", country: "Egypt", gender: "Female", phone: "+201001234003", creatorType: "Fashion blogger" });
+  const cHana = await ensureCreator(lina, { name: "Hana Khatib", niche: "Family", platform: Platform.INSTAGRAM, handle: "hana.khatib", followers: 223000, engRate: 4.9, city: "Giza", country: "Egypt", gender: "Female", phone: "+201001234004", creatorType: "Blogger" });
+  const cDina = await ensureCreator(lina, { name: "Dina Fawzy", niche: "Beauty", platform: Platform.INSTAGRAM, handle: "dina.fawzy", followers: 531000, engRate: 8.2, city: "Cairo", country: "Egypt", gender: "Female", phone: "+201001234005", creatorType: "Micro-influencer" });
+  const cTarek = await ensureCreator(lina, { name: "Tarek Omar", niche: "Automotive", platform: Platform.YOUTUBE, handle: "tarek.omar", followers: 178000, engRate: 3.2, city: "Mansoura", country: "Egypt", gender: "Male", phone: "+201001234006", creatorType: "YouTuber" });
+  const cSalma = await ensureCreator(maya, { name: "Salma Yehia", niche: "Fashion", platform: Platform.INSTAGRAM, handle: "salma.yehia", followers: 684000, engRate: 6.1, city: "Cairo", country: "Egypt", gender: "Female", phone: "+201001234007", creatorType: "Fashion blogger" });
 
   const eLayla = await ensureEngagement(cLayla!.id, budgetTeam.id, { stageSlug: "prospecting", dealType: DealType.FIXED_BUDGET, title: "Fitness campaign", amount: 800 });
   const eOmar = await ensureEngagement(cOmar!.id, budgetTeam.id, { stageSlug: "initial-contact", dealType: DealType.COMMISSION, title: "Gaming affiliate", couponCode: "GAME10", commissionPercent: 15 });
@@ -353,6 +404,69 @@ async function main() {
         status: GiftStatus.REJECTED,
       },
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Backfill: enrich creators created before reference data existed so the
+  // gifting hard stop (country, city, creator type, phone required) passes.
+  // -------------------------------------------------------------------------
+  const fallbackCountryId = countryIdByName.get("Egypt") ?? null;
+  const fallbackCityId = cityIdByName.get("Cairo") ?? null;
+  const fallbackTypeId = creatorTypeIdByName.get("Blogger") ?? null;
+  const genders = ["Female", "Male", "Other", "Prefer not to say"];
+  const allCreators = await prisma.creator.findMany({
+    where: { deletedAt: null },
+    orderBy: { name: "asc" },
+  });
+  let phoneSeq = 101;
+  const usedPhones = new Set<string>(
+    (await prisma.creator.findMany({ where: { phone: { not: null } }, select: { phone: true } })).map(
+      (c) => c.phone as string,
+    ),
+  );
+  const validCountryIds = new Set<string>(
+    (await prisma.country.findMany({ select: { id: true } })).map((c) => c.id),
+  );
+  const validCityIds = new Set<string>(
+    (await prisma.city.findMany({ select: { id: true } })).map((c) => c.id),
+  );
+  for (let i = 0; i < allCreators.length; i++) {
+    const row = allCreators[i];
+    const cityId =
+      (row.city ? cityIdByName.get(row.city) ?? null : null) ??
+      (row.cityId && validCityIds.has(row.cityId) ? row.cityId : null) ??
+      fallbackCityId;
+    const countryId =
+      (row.city ? countryIdByCity.get(row.city) ?? null : null) ??
+      (row.country ? countryIdByName.get(row.country) ?? null : null) ??
+      (row.countryId && validCountryIds.has(row.countryId) ? row.countryId : null) ??
+      fallbackCountryId;
+    const creatorTypeId = row.creatorTypeId ?? fallbackTypeId;
+    const gender = row.gender ?? genders[i % genders.length];
+    let phone = row.phone;
+    if (!phone) {
+      do {
+        phone = `+20${String(phoneSeq++).padStart(9, "0")}`;
+      } while (usedPhones.has(phone));
+      usedPhones.add(phone);
+    }
+    const needs =
+      row.phone !== phone ||
+      row.gender !== gender ||
+      row.creatorTypeId !== creatorTypeId ||
+      row.countryId !== countryId ||
+      row.cityId !== cityId;
+    if (needs) {
+      try {
+        await prisma.creator.update({
+          where: { id: row.id },
+          data: { phone, gender, creatorTypeId, countryId, cityId },
+        });
+      } catch (e) {
+        console.error(`Backfill failed for ${row.name}:`, { countryId, cityId, phone, gender, creatorTypeId });
+        throw e;
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
