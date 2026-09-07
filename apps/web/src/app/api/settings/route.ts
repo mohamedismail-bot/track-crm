@@ -160,6 +160,35 @@ export async function PUT(req: NextRequest) {
     entries[SETTING_KEYS.CUSTOM_FIELDS_ENABLED] = body.customFieldsEnabled ? "true" : "false";
   if (body.approvalEnabled !== undefined)
     entries[SETTING_KEYS.APPROVAL_REQUIRED] = body.approvalEnabled ? "true" : "false";
+  if (body.unassignedVisibleFields !== undefined) {
+    let opts: unknown = body.unassignedVisibleFields;
+    if (typeof body.unassignedVisibleFields === "string") {
+      try {
+        opts = JSON.parse(body.unassignedVisibleFields);
+      } catch {
+        return jsonError("unassignedVisibleFields must be a JSON array of strings.", 400);
+      }
+    }
+    if (!Array.isArray(opts) || opts.some((o) => typeof o !== "string")) {
+      return jsonError("unassignedVisibleFields must be a JSON array of strings.", 400);
+    }
+    const allowed = new Set([
+      "platformLink",
+      "creatorName",
+      "city",
+      "phone",
+      "email",
+      "followers",
+      "engagementRate",
+      "creatorType",
+      "shopify",
+    ]);
+    const cleaned = (opts as string[]).filter((o) => allowed.has(o));
+    // Platform link + creator name are always mandatory for unassigned teams.
+    entries[SETTING_KEYS.UNASSIGNED_VISIBLE_FIELDS] = JSON.stringify(
+      Array.from(new Set(["platformLink", "creatorName", ...cleaned])),
+    );
+  }
 
   if (Object.keys(entries).length === 0) return jsonError("No valid settings provided.", 400);
   await setSettingsMany(entries);

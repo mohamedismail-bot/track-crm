@@ -27,31 +27,25 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import {
-  PlatformBadge,
+  PlatformLogoBadge,
   initials,
   formatFollowerCount,
   formatDate,
   timeAgo,
 } from "@/lib/display";
-import { CreatorListItem, relationshipLabel, approvalBadge, incompleteBadge } from "./creator-card";
+import {
+  CreatorListItem,
+  relationshipLabel,
+  approvalBadge,
+  incompleteBadge,
+  StageDropdown,
+} from "./creator-card";
 
 type TableRow = CreatorListItem;
 
 type CellCtx = { getValue: () => unknown; row: { original: TableRow } };
 
-const PLATFORM_COLORS: Record<string, string> = {
-  INSTAGRAM: "#E4405F",
-  TIKTOK: "#010101",
-  YOUTUBE: "#FF0000",
-  X: "#14171A",
-  SNAPCHAT: "#FFFC00",
-  FACEBOOK: "#1877F2",
-  LINKEDIN: "#0A66C2",
-  TWITCH: "#9146FF",
-  OTHER: "#6b7280",
-};
-
-function columns(): LegacyColumnDef<TableRow>[] {
+function columns(onStageChanged?: (id: string, stage: { id: string; name: string }) => void): LegacyColumnDef<TableRow>[] {
   return [
     {
       accessorKey: "name",
@@ -82,29 +76,9 @@ function columns(): LegacyColumnDef<TableRow>[] {
         if (!c.profiles.length) return null;
         return (
           <span className="inline-flex flex-wrap gap-1">
-            {c.profiles.map((p) =>
-              p.url ? (
-                <Tooltip key={`${p.platform}-${p.handle}`}>
-                  <TooltipTrigger asChild>
-                    <a
-                      href={p.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={`${p.platform} profile of @${p.handle}`}
-                      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ring-1 ring-black/10 transition-transform hover:scale-110"
-                      style={{ backgroundColor: PLATFORM_COLORS[p.platform] ?? "#6b7280" }}
-                    >
-                      {p.platform.slice(0, 1)}
-                    </a>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {p.platform} · @{p.handle}
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                <PlatformBadge key={`${p.platform}-${p.handle}`} platform={p.platform} />
-              ),
-            )}
+            {c.profiles.map((p) => (
+              <PlatformLogoBadge key={`${p.platform}-${p.handle}`} platform={p.platform} url={p.url} handle={p.handle} />
+            ))}
           </span>
         );
       },
@@ -146,9 +120,20 @@ function columns(): LegacyColumnDef<TableRow>[] {
       accessorKey: "stage",
       id: "stage",
       header: "Stage",
-      cell: ({ getValue }: CellCtx) => {
-        const v = getValue() as TableRow["stage"];
-        return v ? <Badge variant="outline">{v.name}</Badge> : null;
+      cell: ({ row }: CellCtx) => {
+        const c = row.original;
+        if (!c.stage) return null;
+        if (c.canMove && c.currentEngagementId && onStageChanged) {
+          return (
+            <StageDropdown
+              creator={c}
+              onStageChanged={(name) =>
+                onStageChanged(c.id, { id: c.stage!.id, name })
+              }
+            />
+          );
+        }
+        return <Badge variant="outline">{c.stage.name}</Badge>;
       },
     },
     {
@@ -297,8 +282,30 @@ function sortValue(c: CreatorListItem, id: string): string | number {
   }
 }
 
-export function CreatorsTable({ creators }: { creators: CreatorListItem[] }) {
+const STORAGE_KEY = "trackcrm-table-columns";
+
+export function CreatorsTable({
+  creators,
+  onStageChanged,
+}: {
+  creators: CreatorListItem[];
+  onStageChanged?: (id: string, stage: { id: string; name: string }) => void;
+}) {
   const [hidden, setHidden] = React.useState<Set<string>>(() => {
+    if (typeof window === "undefined") {
+      const h = new Set<string>();
+      for (const c of ALL_COLUMNS) {
+        if (!DEFAULT_VISIBLE.includes(c.id)) h.add(c.id);
+      }
+      return h;
+    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const arr: string[] = JSON.parse(saved);
+        if (Array.isArray(arr)) return new Set(arr);
+      }
+    } catch {}
     const h = new Set<string>();
     for (const c of ALL_COLUMNS) {
       if (!DEFAULT_VISIBLE.includes(c.id)) h.add(c.id);
@@ -326,7 +333,7 @@ export function CreatorsTable({ creators }: { creators: CreatorListItem[] }) {
 
   const table = useTable({
     data: sortedCreators,
-    columns: columns(),
+    columns: columns(onStageChanged),
     getCoreRowModel: getCoreRowModel(),
   });
 
@@ -338,6 +345,9 @@ export function CreatorsTable({ creators }: { creators: CreatorListItem[] }) {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      if (typeof window !== "undefined") {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...next])); } catch {}
+      }
       return next;
     });
 

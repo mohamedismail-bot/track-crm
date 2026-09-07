@@ -8,6 +8,8 @@ import {
 import type { Platform, DealType, DeliverableStatus, GiftStatus, ActivityType } from "@prisma/client";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
+export { PlatformLogoBadge, PlatformLogoIcon } from "./platform-icons";
+
 export function PlatformBadge({ platform }: { platform: Platform }) {
   return <span className="font-medium">{PLATFORM_LABELS[platform]}</span>;
 }

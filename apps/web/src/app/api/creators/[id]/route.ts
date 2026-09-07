@@ -101,6 +101,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     isOwnedByMe: owns,
     canMove: ((owns || isManager || session.roleSlug === "admin") && sameTeam) || (session.roleSlug === "admin" && owns),
     canLog: sameTeam,
+    unassignedVisibleFields:
+      settings.unassignedVisibleFields.length > 0
+        ? settings.unassignedVisibleFields
+        : ["platformLink", "creatorName"],
     canReviewApproval:
       (session.roleSlug === "admin" ||
         (creator.approvalStatus !== null &&
@@ -122,7 +126,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Only the assigned owner, the team's manager, or the admin may edit a creator.
   const creatorBefore = await prisma.creator.findUnique({
     where: { id, deletedAt: null },
-    include: { ownerships: true, countryRef: true },
+    include: { ownerships: true, countryRef: true, profiles: true },
   });
   if (!creatorBefore) return jsonError("Creator not found.", 404);
   const isManager = session.roleSlug === "team-manager";
@@ -148,10 +152,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Protected identity fields — only the Admin may change these.
     if (session.roleSlug !== "admin") {
+      const existingProfiles = creatorBefore.profiles?.map((p) => p.url) ?? [];
+      const submittedProfiles = (body.profiles ?? []) as { url?: string; input?: string }[];
+      // Non-admins may add NEW profiles but not remove or change existing URLs.
       if (body.profiles !== undefined) {
-        return jsonError("Only the Admin can change the platform profiles of a creator.", 403);
+        const removed = existingProfiles.some((url) => !submittedProfiles.some((p) => (p.url ?? "") === url));
+        if (removed) {
+          return jsonError("You can add platform profiles but cannot remove existing ones.", 403);
+        }
       }
-      for (const field of ["name", "email"] as const) {
+      for (const field of ["name"] as const) {
         if (
           body[field] !== undefined &&
           (body[field] as string | null) !== creatorBefore[field] &&
@@ -160,6 +170,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ) {
           return jsonError(`Only the Admin can change the ${field} of a creator.`, 403);
         }
+      }
+      // Email is editable only by the admin unless it is currently empty.
+      if (
+        body.email !== undefined &&
+        creatorBefore.email &&
+        (body.email as string | null)?.trim().toLowerCase() !== creatorBefore.email.toLowerCase()
+      ) {
+        return jsonError("Only the Admin can change the email of a creator once it is set.", 403);
       }
     }
 
@@ -247,9 +265,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       });
 
       if (body.profiles !== undefined) {
-        const { replaceCreatorProfiles } = await import("@/lib/creators");
+        const { replaceCreatorProfiles, addCreatorProfiles } = await import("@/lib/creators");
         try {
-          await replaceCreatorProfiles(id, body.profiles, tx);
+          if (session.roleSlug === "admin") {
+            await replaceCreatorProfiles(id, body.profiles, tx);
+          } else {
+            // Non-admin: only append new profiles; keep existing untouched.
+            const existingUrls = new Set((creatorBefore.profiles ?? []).map((p) => p.url));
+            const newOnes = (body.profiles as { platform: string; input: string; isPrimary?: boolean }[]).filter(
+              (p) => !existingUrls.has(p.input ?? ""),
+            );
+            if (newOnes.length > 0) {
+              await addCreatorProfiles(id, newOnes, tx);
+            }
+          }
         } catch (e) {
           const dupMsg = e instanceof Error ? e.message : "";
           if (dupMsg.includes("already linked") || dupMsg.includes("Duplicate profile")) {

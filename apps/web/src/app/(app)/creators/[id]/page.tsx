@@ -170,6 +170,7 @@ interface CreatorDetail {
   canReviewApproval: boolean;
   missingRequiredForGifting: string[];
   incompleteData: boolean;
+  unassignedVisibleFields: string[];
 }
 
 function ActivityForm({ creatorId, canLog, onLogged }: { creatorId: string; canLog: boolean; onLogged: () => void }) {
@@ -604,14 +605,18 @@ export default function CreatorProfilePage() {
               ) : creator.primaryProfile?.platform ? (
                 <PlatformBadge platform={creator.primaryProfile.platform} />
               ) : null}
-              {creator.followers != null ? <span>{formatFollowerCount(creator.followers)} followers</span> : null}
-              {creator.engagementRate != null ? <span>{creator.engagementRate}% ER</span> : null}
-              {creator.creatorType ? (
+              {creator.followers != null && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("followers") : true) ? (
+                <span>{formatFollowerCount(creator.followers)} followers</span>
+              ) : null}
+              {creator.engagementRate != null && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("engagementRate") : true) ? (
+                <span>{creator.engagementRate}% ER</span>
+              ) : null}
+              {creator.creatorType && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("creatorType") : true) ? (
                 <span className="inline-flex items-center gap-1">
                   <Tag className="h-3.5 w-3.5" /> {creator.creatorType}
                 </span>
               ) : null}
-              {creator.shopifyRegistered ? (
+              {creator.shopifyRegistered && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("shopify") : true) ? (
                 <span className="inline-flex items-center gap-1 text-emerald-600">
                   <Store className="h-3.5 w-3.5" /> Shopify
                 </span>
@@ -623,16 +628,16 @@ export default function CreatorProfilePage() {
                   <ExternalLink className="h-3 w-3" /> Profile link
                 </a>
               ) : null}
-              {creator.gender ? (
+              {creator.gender && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("gender") : true) ? (
                 <span className="inline-flex items-center gap-1 text-xs"><Tag className="h-3 w-3" /> {creator.gender}</span>
               ) : null}
-              {creator.city && creator.country ? (
+              {creator.city && creator.country && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("city") : true) ? (
                 <span className="inline-flex items-center gap-1 text-xs"><MapPin className="h-3 w-3" /> {creator.city}, {creator.country}</span>
               ) : null}
-              {creator.email ? (
+              {creator.email && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("email") : true) ? (
                 <span className="inline-flex items-center gap-1 text-xs"><Mail className="h-3 w-3" /> {creator.email}</span>
               ) : null}
-              {creator.phone ? (
+              {creator.phone && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("phone") : true) ? (
                 <span className="inline-flex items-center gap-1 text-xs"><Phone className="h-3 w-3" /> {creator.phone}</span>
               ) : null}
             </div>

@@ -165,6 +165,7 @@ export const SETTING_KEYS = {
   NICHE_OPTIONS: "creator.nicheOptions",
   CUSTOM_FIELDS_ENABLED: "creator.customFieldsEnabled",
   APPROVAL_REQUIRED: "approval.requireCreatorApproval",
+  UNASSIGNED_VISIBLE_FIELDS: "visibility.unassignedVisibleFields",
 } as const;
 
 export interface BrandColor {
@@ -302,6 +303,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
     '["Fashion","Beauty","Tech","Gaming","Food","Travel","Fitness","Family","Lifestyle","Automotive","Business","Sports","Other"]',
   [SETTING_KEYS.CUSTOM_FIELDS_ENABLED]: "true",
   [SETTING_KEYS.APPROVAL_REQUIRED]: "false",
+  [SETTING_KEYS.UNASSIGNED_VISIBLE_FIELDS]: '["platformLink","creatorName"]',
 };
 
 // ---------------------------------------------------------------------------

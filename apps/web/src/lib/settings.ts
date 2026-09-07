@@ -21,6 +21,7 @@ export interface WorkspaceSettings {
   nicheOptions: string[];
   customFieldsEnabled: boolean;
   approvalEnabled: boolean;
+  unassignedVisibleFields: string[];
 }
 
 export async function getSettings(): Promise<WorkspaceSettings> {
@@ -46,6 +47,7 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     nicheOptions: jsonArray(all[SETTING_KEYS.NICHE_OPTIONS]),
     customFieldsEnabled: all[SETTING_KEYS.CUSTOM_FIELDS_ENABLED] !== "false",
     approvalEnabled: all[SETTING_KEYS.APPROVAL_REQUIRED] === "true",
+    unassignedVisibleFields: jsonArray(all[SETTING_KEYS.UNASSIGNED_VISIBLE_FIELDS]),
   };
 }
 

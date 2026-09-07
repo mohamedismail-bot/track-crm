@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown } from "lucide-react";
+import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown, RotateCcw } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,67 @@ import { ImportCreatorsDialog } from "@/components/creators/creator-import";
 
 type View = "card" | "table" | "kanban";
 
+function GroupedCreatorCards({
+  creators,
+  groupBy,
+}: {
+  creators: CreatorListItem[];
+  groupBy: "none" | "stage" | "owner" | "team";
+}) {
+  if (creators.length === 0) {
+    return (
+      <div className="rounded-xl border p-10 text-center text-muted-foreground">
+        No creators found. Try adjusting your filters or add a creator.
+      </div>
+    );
+  }
+
+  if (groupBy === "none") {
+    return (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {creators.map((c) => (
+          <CreatorCard key={c.id} creator={c} />
+        ))}
+      </div>
+    );
+  }
+
+  const groups = new Map<string, CreatorListItem[]>();
+  for (const c of creators) {
+    let label: string;
+    if (groupBy === "stage") label = c.stage?.name ?? "No stage";
+    else if (groupBy === "owner") label = c.owners[0] ? `${c.owners[0].name} · ${c.owners[0].teamName}` : "Unassigned";
+    else label = c.teams[0]?.name ?? "No team";
+    const arr = groups.get(label) ?? [];
+    arr.push(c);
+    groups.set(label, arr);
+  }
+  const order =
+    groupBy === "stage"
+      ? Array.from(groups.keys()).sort((a, b) => (a === "No stage" ? 1 : b === "No stage" ? -1 : a.localeCompare(b)))
+      : Array.from(groups.keys()).sort((a, b) => a.localeCompare(b));
+
+  return (
+    <div className="space-y-6">
+      {order.map((label) => (
+        <section key={label}>
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+            {label}
+            <span className="rounded-full border px-2 py-0.5 text-xs font-normal">
+              {(groups.get(label) ?? []).length}
+            </span>
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {(groups.get(label) ?? []).map((c) => (
+              <CreatorCard key={c.id} creator={c} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 interface FilterOption {
   value: string;
   label: string;
@@ -41,6 +102,7 @@ interface ReferenceData {
 export default function CreatorsPage() {
   const params = useSearchParams();
   const [view, setView] = React.useState<View>("card");
+  const [groupBy, setGroupBy] = React.useState<"none" | "stage" | "owner" | "team">("none");
   const [creators, setCreators] = React.useState<CreatorListItem[]>([]);
   const [stages, setStages] = React.useState<KanbanStage[]>([]);
   const [teams, setTeams] = React.useState<FilterOption[]>([
@@ -63,6 +125,7 @@ export default function CreatorsPage() {
     incomplete: params.get("incomplete") === "1",
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
+    myAssigned: false,
   });
   const [sort, setSort] = React.useState("latest");
   const [me, setMe] = React.useState<{
@@ -170,7 +233,7 @@ export default function CreatorsPage() {
 
   const activeTrigger = (active: boolean) =>
     active ? "border-primary/60 bg-primary/5 font-medium text-primary" : "";
-  const smartCount = [filters.incomplete, filters.overdue, filters.upcoming, filters.pending].filter(Boolean).length;
+  const smartCount = [filters.incomplete, filters.overdue, filters.upcoming, filters.pending, filters.myAssigned].filter(Boolean).length;
 
   const SORT_OPTIONS: { value: string; label: string }[] = [
     { value: "latest", label: "Recently updated" },
@@ -231,6 +294,19 @@ export default function CreatorsPage() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+        {view === "card" ? (
+          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as "none" | "stage" | "owner" | "team")}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Group by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No grouping</SelectItem>
+              <SelectItem value="stage">Group by stage</SelectItem>
+              <SelectItem value="owner">Group by owner</SelectItem>
+              <SelectItem value="team">Group by team</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : null}
         <Select value={filters.team} onValueChange={(v) => setFilters((f) => ({ ...f, team: v }))}>
           <SelectTrigger className={cn("w-40", activeTrigger(filters.team !== "all-team"))}>
             <SelectValue placeholder="All teams" />
@@ -397,6 +473,52 @@ export default function CreatorsPage() {
         </Popover.Root>
       </div>
 
+      <div className="flex items-center gap-2">
+        <Button
+          variant={filters.myAssigned ? "default" : "outline"}
+          size="sm"
+          className="gap-1.5"
+          onClick={() =>
+            setFilters((f) => ({
+              ...f,
+              myAssigned: !f.myAssigned,
+              owner: !f.myAssigned && me?.id ? me.id : "",
+            }))
+          }
+        >
+          {filters.myAssigned ? <Check className="h-3.5 w-3.5" /> : null}
+          My assigned
+        </Button>
+        {(filters.q || filters.team !== "all-team" || filters.stage !== "all-stage" || filters.platform !== "all-platform" || filters.pool !== "all-pool" || filters.owner || filters.gender !== "all-gender" || filters.shopify !== "all-shopify" || filters.niche !== "all-niche" || filters.pending || filters.incomplete || filters.overdue || filters.upcoming || filters.myAssigned || sort !== "latest") ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-muted-foreground"
+            onClick={() => {
+              setFilters({
+                q: "",
+                team: "all-team",
+                stage: "all-stage",
+                platform: "all-platform",
+                pool: "all-pool",
+                owner: "",
+                gender: "all-gender",
+                shopify: "all-shopify",
+                niche: "all-niche",
+                pending: false,
+                incomplete: false,
+                overdue: false,
+                upcoming: false,
+                myAssigned: false,
+              });
+              setSort("latest");
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Reset all filters
+          </Button>
+        ) : null}
+      </div>
+
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -404,17 +526,14 @@ export default function CreatorsPage() {
           ))}
         </div>
       ) : view === "card" ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {creators.length === 0 ? (
-            <div className="col-span-full rounded-xl border p-10 text-center text-muted-foreground">
-              No creators found. Try adjusting your filters or add a creator.
-            </div>
-          ) : (
-            creators.map((c) => <CreatorCard key={c.id} creator={c} />)
-          )}
-        </div>
+        <GroupedCreatorCards creators={creators} groupBy={groupBy} />
       ) : view === "table" ? (
-        <CreatorsTable creators={creators} />
+        <CreatorsTable
+          creators={creators}
+          onStageChanged={(id, stage) =>
+            setCreators((prev) => prev.map((c) => (c.id === id ? { ...c, stage } : c)))
+          }
+        />
       ) : (
         <KanbanBoard creators={creators} stages={stages} />
       )}

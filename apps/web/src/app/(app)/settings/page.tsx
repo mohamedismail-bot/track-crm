@@ -43,6 +43,7 @@ interface SettingsData {
   nicheOptions: string[];
   customFieldsEnabled: boolean;
   approvalEnabled: boolean;
+  unassignedVisibleFields: string[];
   stages: { id: string; name: string; isCompleted: boolean }[];
 }
 
@@ -172,6 +173,7 @@ export default function SettingsPage() {
       fd.append("nicheOptions", JSON.stringify(data.nicheOptions));
       fd.append("customFieldsEnabled", data.customFieldsEnabled ? "true" : "false");
       fd.append("approvalEnabled", data.approvalEnabled ? "true" : "false");
+      fd.append("unassignedVisibleFields", JSON.stringify(data.unassignedVisibleFields ?? ["platformLink", "creatorName"]));
       if (logoFile) {
         fd.append("logo", logoFile);
       } else if (removeLogo) {
@@ -541,6 +543,61 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Unassigned team visibility</CardTitle>
+          <CardDescription>
+            Control which creator details an unassigned team can view when inspecting another team&apos;s creator.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Unassigned teams always see the creator&apos;s status, stage and activity log. The platform link and creator
+            name are always shown to any user; choose which additional creator fields an unassigned team may see.
+          </p>
+          {[
+            { key: "platformLink", title: "Platform link", desc: "Always shown (mandatory)." },
+            { key: "creatorName", title: "Creator name", desc: "Always shown (mandatory)." },
+            { key: "city", title: "City", desc: "Show the creator's city to unassigned teams." },
+            { key: "phone", title: "Phone", desc: "Show the creator's phone number to unassigned teams." },
+            { key: "email", title: "Email", desc: "Show the creator's email to unassigned teams." },
+            { key: "followers", title: "Followers", desc: "Show follower counts to unassigned teams." },
+            { key: "engagementRate", title: "Engagement rate", desc: "Show engagement rate to unassigned teams." },
+            { key: "creatorType", title: "Creator type", desc: "Show the creator type to unassigned teams." },
+            { key: "shopify", title: "Shopify status", desc: "Show Shopify registration status to unassigned teams." },
+          ].map(({ key, title, desc }) => {
+            const mandatory = key === "platformLink" || key === "creatorName";
+            return (
+              <div key={key} className="flex items-center justify-between gap-4 rounded-lg border p-3">
+                <div>
+                  <p className="text-sm font-medium">{title}</p>
+                  <p className="text-xs text-muted-foreground">{desc}</p>
+                </div>
+                <Toggle
+                  label=""
+                  checked={(data.unassignedVisibleFields ?? ["platformLink", "creatorName"]).includes(key)}
+                  disabled={mandatory}
+                  onChange={
+                    mandatory
+                      ? () => {}
+                      : (v) =>
+                          set(
+                            "unassignedVisibleFields",
+                            v
+                              ? Array.from(new Set([...(data.unassignedVisibleFields ?? []), key]))
+                              : (data.unassignedVisibleFields ?? []).filter((f) => f !== key),
+                          )
+                  }
+                />
+              </div>
+            );
+          })}
+          <p className="text-xs text-muted-foreground">
+            The platform link and creator name are always visible. Changes save with the main Save button.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Creator fields</CardTitle>
           <CardDescription>
             Which fields appear on a creator record, whether they are mandatory, and any
@@ -791,16 +848,22 @@ function Toggle({
   label,
   checked,
   onChange,
+  disabled,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
-      onClick={() => onChange(!checked)}
-      className="flex items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm hover:bg-accent"
+      onClick={() => !disabled && onChange(!checked)}
+      disabled={disabled}
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm hover:bg-accent",
+        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent",
+      )}
     >
       <span>{label}</span>
       <span

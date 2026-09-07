@@ -157,6 +157,8 @@ export function CreatorFormDialog({
   const [notes, setNotes] = React.useState("");
   const [custom, setCustom] = React.useState<Record<string, string | number | boolean | null>>(emptyCustom);
   const [profiles, setProfiles] = React.useState<ProfileRow[]>([]);
+  const [stages, setStages] = React.useState<{ id: string; name: string }[]>([]);
+  const [stageId, setStageId] = React.useState("");
 
   // Inline duplicate-check state (per profile row index).
   const [dupChecks, setDupChecks] = React.useState<Record<number, { state: "idle" | "checking" | "ok" | "dup"; text?: string; url?: string; creatorId?: string; self?: boolean }>>({});
@@ -196,6 +198,11 @@ export function CreatorFormDialog({
       if (me?.id) {
         setMe((prev) => prev ?? { id: me.id, teamId: me.teamId ?? null });
         setOwnerIds((prev) => (prev.length ? prev : [me.id]));
+      }
+      const stageList = (opts?.stages ?? []) as { id: string; name: string }[];
+      setStages(stageList);
+      if (stageList.length > 0) {
+        setStageId((prev) => prev || stageList[0].id);
       }
     })();
     return () => {
@@ -263,6 +270,7 @@ export function CreatorFormDialog({
   const customFieldsVisible = (ref?.customFieldsEnabled ?? true) && customFields.length > 0;
   const nicheOptions = ref?.nicheOptions ?? [];
   const lockedProtected = mode === "edit" && initial?.canEditProtected === false;
+  const emailLocked = mode === "edit" && initial?.canEditProtected === false && !!initial?.email;
   const ownerAssignable: MultiSelectOption[] = (me?.teamId
     ? ownerOptions.filter((o) => o.teamId === me.teamId)
     : ownerOptions
@@ -349,6 +357,17 @@ export function CreatorFormDialog({
         setPhoneDup(null);
         return;
       }
+      // Gate: only check when entered digits match the country's expected length
+      // (or when country has no defined length and digits are at least 6).
+      const expected = dialCountry?.phoneDigits;
+      if (expected != null && phoneDigitsClean.length !== expected) {
+        setPhoneDup(null);
+        return;
+      }
+      if (expected == null && phoneDigitsClean.length < 6) {
+        setPhoneDup(null);
+        return;
+      }
       try {
         const res = await fetch(`/api/creators/check?platform=PHONE&handle=${encodeURIComponent(phonePreview)}${initial?.id ? `&exclude=${initial.id}` : ""}`);
         const j = await res.json();
@@ -358,7 +377,7 @@ export function CreatorFormDialog({
     }, 400);
     timers.push(emailTimer, phoneTimer);
     return () => timers.forEach(clearTimeout);
-  }, [profiles, mutedRows, email, phonePreview, initial?.id]);
+  }, [profiles, mutedRows, email, phonePreview, phoneDigitsClean, dialCountry, initial?.id]);
 
   const validateLocal = (): string | null => {
     if (!name.trim()) return "Creator name is required.";
@@ -387,6 +406,9 @@ export function CreatorFormDialog({
       if (check?.state === "dup") return `@${handle} is already linked to another creator.`;
     }
     if (email.trim() && !/.+@.+\..+/.test(email.trim())) return "Email must be a valid email address.";
+    if (mode === "edit" && emailLocked && email.trim() && email.trim().toLowerCase() !== (initial?.email ?? "").toLowerCase()) {
+      return "Only the Admin can change an email once it is set.";
+    }
     for (const f of customFields) {
       const value = custom[f.id!];
       const isEmpty = value == null || value === "";
@@ -418,13 +440,28 @@ export function CreatorFormDialog({
       notes: notes.trim() || undefined,
       customFields: custom,
       ...(mode === "create" && ownerIds.length ? { ownerIds } : {}),
-      ...(mode === "edit" && initial && !initial.canEditProtected
-        ? {}
-        : {
+      ...(mode === "create" && stageId ? { stageId } : {}),
+      ...(mode === "create"
+        ? {
             profiles: profiles
               .filter((p) => p.input.trim())
               .map((p) => ({ platform: p.platform, input: p.input.trim(), isPrimary: p.isPrimary })),
-          }),
+          }
+        : mode === "edit" && initial && !initial.canEditProtected
+          ? {
+              // Non-admin edit: send only newly-added profiles so existing ones are kept.
+              profiles: profiles
+                .filter((p) => {
+                  const existingInputs = (initial.profiles ?? []).map((ep) => ep.handle ?? "").map((h) => h.toLowerCase());
+                  return p.input.trim() && !existingInputs.includes(p.input.trim().toLowerCase());
+                })
+                .map((p) => ({ platform: p.platform, input: p.input.trim(), isPrimary: p.isPrimary })),
+            }
+          : {
+              profiles: profiles
+                .filter((p) => p.input.trim())
+                .map((p) => ({ platform: p.platform, input: p.input.trim(), isPrimary: p.isPrimary })),
+            }),
     };
 
     setSubmitting(true);
@@ -510,7 +547,7 @@ export function CreatorFormDialog({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
-                disabled={lockedProtected}
+                disabled={emailLocked}
               />
               {email.trim() && !/.+@.+\..+/.test(email.trim()) ? (
                 <p className="text-xs text-destructive">Enter a valid email address.</p>
@@ -518,7 +555,7 @@ export function CreatorFormDialog({
               {emailDup ? <p className="text-xs text-destructive">A creator with this email already exists.</p> : null}
               {lockedProtected ? (
                 <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <ShieldAlert className="h-3 w-3" /> Name, email and platform profiles can only be changed by the Admin.
+                  <ShieldAlert className="h-3 w-3" /> Name and existing profiles can only be changed by the Admin; you can add new profiles.
                 </p>
               ) : null}
             </div>
@@ -688,6 +725,26 @@ export function CreatorFormDialog({
             </div>
           ) : null}
 
+          {/* Pipeline stage (create only) */}
+          {mode === "create" && stages.length > 0 ? (
+            <div className="space-y-1.5">
+              <Label>Starting stage</Label>
+              <Select value={stageId} onValueChange={setStageId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select stage" />
+                </SelectTrigger>
+                <SelectContent>
+                  {stages.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">The engagement will start at this pipeline stage.</p>
+            </div>
+          ) : null}
+
           {/* Platform profiles */}
           <div className="space-y-3">
             <Label className="text-sm font-semibold">
@@ -697,25 +754,25 @@ export function CreatorFormDialog({
               {PLATFORMS.map((p) => {
                 const active = profiles.some((r) => r.platform === p);
                 return (
-                  <Button
-                    key={p}
-                    type="button"
-                    size="sm"
-                    variant={active ? "default" : "outline"}
-                    className="text-xs"
-                    disabled={lockedProtected}
-                    onClick={() => {
-                      if (active) {
-                        setProfiles((prev) => prev.filter((r) => r.platform !== p));
-                      } else {
-                        setProfiles((prev) => [
-                          ...prev,
-                          { platform: p, input: "", isPrimary: prev.length === 0 },
-                        ]);
-                      }
-                      setDupChecks({});
-                    }}
-                  >
+                    <Button
+                      key={p}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      className="text-xs"
+                      disabled={false}
+                      onClick={() => {
+                        if (active) {
+                          setProfiles((prev) => prev.filter((r) => r.platform !== p));
+                        } else {
+                          setProfiles((prev) => [
+                            ...prev,
+                            { platform: p, input: "", isPrimary: prev.length === 0 },
+                          ]);
+                        }
+                        setDupChecks({});
+                      }}
+                    >
                     {PLATFORM_LABELS[p]}
                   </Button>
                 );
@@ -740,8 +797,7 @@ export function CreatorFormDialog({
                       disabled={lockedProtected}
                       aria-invalid={!!muted || !!showError}
                       className={muted || showError ? "border-destructive" : ""}
-                    />
-                    <Button
+                    />                    <Button
                       type="button"
                       size="icon"
                       variant="ghost"

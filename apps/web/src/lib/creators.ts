@@ -42,6 +42,7 @@ export interface CreateCreatorInput {
   customFields?: Record<string, string | number | boolean | null>;
   ownerIds?: string[];
   profiles: NewProfileInput[];
+  stageId?: string;
 }
 
 export function parseNumeric(value: string | number | undefined): number | null {
@@ -398,6 +399,58 @@ export async function replaceCreatorProfiles(
   return profiles;
 }
 
+/** Append new platform profiles without touching existing ones (add-only). */
+export async function addCreatorProfiles(
+  creatorId: string,
+  inputProfiles: NewProfileInput[],
+  tx: Prisma.TransactionClient = prisma,
+): Promise<NewProfileResult[]> {
+  const validated = inputProfiles.map((p) => validateProfileEntry(p));
+  if (validated.length === 0) return [];
+
+  const existing = await tx.platformProfile.findMany({ where: { creatorId } });
+  const existingKeys = new Set(existing.map((p) => `${p.platform}:${p.normalizedHandle}`));
+
+  for (const p of validated) {
+    const key = `${p.platform}:${p.normalizedHandle}`;
+    if (existingKeys.has(key)) throw new Error(`@${p.handle} on ${p.platform} is already linked.`);
+    existingKeys.add(key);
+  }
+
+  for (const p of validated) {
+    const dup = await findDuplicateProfile(p.url, p.platform, creatorId);
+    if (dup) {
+      throw new Error(
+        `@${p.handle} on ${p.platform} is already linked to ${dup.creator.name}. Check your entry.`,
+      );
+    }
+  }
+
+  const primary = existing.some((e) => e.isPrimary) || validated.some((p) => p.isPrimary);
+  const profiles = validated.map((p, i) => ({
+    ...p,
+    isPrimary: p.isPrimary ?? (!primary && i === 0),
+  }));
+
+  await tx.platformProfile.createMany({
+    data: profiles.map((p) => ({
+      creatorId,
+      url: p.url,
+      platform: p.platform,
+      isPrimary: p.isPrimary,
+      handle: p.handle,
+      normalizedHandle: p.normalizedHandle,
+    })),
+  });
+  if (!existing.some((e) => e.isPrimary)) {
+    const createdPrimary = await tx.platformProfile.findFirst({ where: { creatorId, isPrimary: true } });
+    if (createdPrimary) {
+      await tx.creator.update({ where: { id: creatorId }, data: { primaryProfileId: createdPrimary.id } });
+    }
+  }
+  return profiles;
+}
+
 /** Compute a creator's E.164 phone from dial-country + local digits (or null). */
 export async function phoneFromInput(
   phoneCountryId: string | undefined,
@@ -470,6 +523,22 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
     ? ownerRows.map((o) => ({ userId: o.id, teamId: o.teamId! }))
     : [{ userId: user.id, teamId: user.teamId }];
 
+  // Auto-assign admin + user's team manager as owners.
+  const [adminUsers, teamManagers] = await Promise.all([
+    prisma.user.findMany({
+      where: { archivedAt: null, role: { slug: "admin" } },
+      select: { id: true, teamId: true },
+    }),
+    prisma.user.findMany({
+      where: { archivedAt: null, teamId: user.teamId, role: { slug: "team-manager" } },
+      select: { id: true, teamId: true },
+    }),
+  ]);
+  const autoOwners = [...adminUsers, ...teamManagers].filter(
+    (u) => !ownerships.some((o) => o.userId === u.id) && u.teamId != null,
+  ).map((o) => ({ userId: o.id, teamId: o.teamId! }));
+  const finalOwnerships = [...ownerships, ...autoOwners];
+
   const created = await prisma.$transaction(async (tx) => {
     const creator = await tx.creator.create({
       data: {
@@ -488,9 +557,34 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
         customFields: Object.keys(validation.data.customFields).length ? validation.data.customFields : undefined,
         createdById: user.id,
         approvalStatus: pendingApproval ? "PENDING" : null,
-        ownerships: pendingApproval ? undefined : { create: ownerships },
+        ownerships: pendingApproval ? undefined : { create: finalOwnerships },
       },
     });
+
+    // Create engagement with the specified stage (or first pipeline stage by default).
+    if (!pendingApproval) {
+      let stageId = input.stageId;
+      if (!stageId) {
+        const firstPipeline = await tx.pipelineConfig.findFirst({
+          where: { teamId: user.teamId },
+          orderBy: { order: "asc" },
+        });
+        stageId = firstPipeline?.stageId;
+      }
+      if (stageId) {
+        await tx.engagement.create({
+          data: {
+            creatorId: creator.id,
+            teamId: user.teamId,
+            stageId,
+            title: `${creator.name} engagement`,
+            dealType: "BARTER",
+            currency: "EGP",
+            createdById: user.id,
+          },
+        });
+      }
+    }
 
     await tx.platformProfile.createMany({
       data: profiles.map((p) => ({
@@ -514,9 +608,9 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
     creatorId: created.creator.id,
     kind: "SYSTEM",
     type: pendingApproval ? "CREATOR_CREATED" : "CREATOR_CREATED",
-    summary: pendingApproval
+      summary: pendingApproval
       ? "Creator created — pending Team Manager approval"
-      : ownerships.length > 1
+      : finalOwnerships.length > 1
         ? "Creator created and assigned to the team"
         : "Creator created and assigned to me",
     description: `Platform profiles: ${profileSummary}`,
