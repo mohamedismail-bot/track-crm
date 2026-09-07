@@ -26,6 +26,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (kind === "country") {
       const name = body.name !== undefined ? String(body.name).trim() : undefined;
       const dialCode = body.dialCode !== undefined ? String(body.dialCode).trim().replace(/^\+/, "") : undefined;
+      let phoneDigits: number | null | undefined = undefined;
+      if (body.phoneDigits !== undefined) {
+        if (body.phoneDigits === null || body.phoneDigits === "") {
+          phoneDigits = null;
+        } else {
+          const n = Number(body.phoneDigits);
+          if (!Number.isInteger(n) || n < 5 || n > 15) {
+            return jsonError("Expected phone digits must be a whole number between 5 and 15.", 400);
+          }
+          phoneDigits = n;
+        }
+      }
       if (name !== undefined && !name) return jsonError("Country name is required.", 400);
       if (dialCode !== undefined && !/^\d{1,4}$/.test(dialCode)) {
         return jsonError("Dial code must be 1–4 digits (e.g. 20).", 400);
@@ -35,6 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         data: {
           ...(name !== undefined ? { name } : {}),
           ...(dialCode !== undefined ? { dialCode: `+${dialCode}` } : {}),
+          ...(phoneDigits !== undefined ? { phoneDigits } : {}),
         },
       });
       return NextResponse.json(row);

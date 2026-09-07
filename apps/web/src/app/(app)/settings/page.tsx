@@ -35,6 +35,7 @@ interface SettingsData {
   giftMonthlyCapEnabled: boolean;
   giftRequirePreviousDeliverable: boolean;
   giftMinStageId: string | null;
+  shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
   passwordMinLength: number;
   passwordComplexity: boolean;
@@ -56,7 +57,13 @@ interface RefField {
 }
 
 interface ReferenceData {
-  countries: { id: string; name: string; dialCode: string; cities: { id: string; name: string }[] }[];
+  countries: {
+    id: string;
+    name: string;
+    dialCode: string;
+    phoneDigits: number | null;
+    cities: { id: string; name: string }[];
+  }[];
   creatorTypes: { id: string; name: string }[];
   fields: RefField[];
 }
@@ -158,6 +165,7 @@ export default function SettingsPage() {
       fd.append("giftMonthlyCapEnabled", data.giftMonthlyCapEnabled ? "true" : "false");
       fd.append("giftRequirePreviousDeliverable", data.giftRequirePreviousDeliverable ? "true" : "false");
       fd.append("giftMinStageId", data.giftMinStageId ?? "");
+      fd.append("shopifyMinStageId", data.shopifyMinStageId ?? "");
       fd.append("passwordMinLength", String(data.passwordMinLength));
       fd.append("passwordComplexity", data.passwordComplexity ? "true" : "false");
       fd.append("genderOptions", JSON.stringify(data.genderOptions));
@@ -624,8 +632,37 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Ownership policy</CardTitle>
-          <CardDescription>Who may work a single creator.</CardDescription>
+          <CardTitle className="text-base">Shopify module</CardTitle>
+          <CardDescription>
+            Control when the Shopify module becomes available on a creator&apos;s profile.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Minimum stage to show the Shopify module</Label>
+            <Select
+              value={data.shopifyMinStageId ?? "none"}
+              onValueChange={(v) => set("shopifyMinStageId", v === "none" ? null : v)}
+            >
+              <SelectTrigger className="w-full sm:max-w-xs">
+                <SelectValue placeholder="No minimum stage" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No minimum stage</SelectItem>
+                {data.stages.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Password policy</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <Toggle
@@ -991,7 +1028,7 @@ function RefList({
   const [newType, setNewType] = React.useState("");
   const [cityFor, setCityFor] = React.useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = React.useState<{ kind: string; id: string; label: string } | null>(null);
-  const [rename, setRename] = React.useState<{ kind: string; id: string; value: string; dial?: string } | null>(null);
+  const [rename, setRename] = React.useState<{ kind: string; id: string; value: string; dial?: string; digits?: string } | null>(null);
 
   const busy = confirmDelete != null || rename != null;
 
@@ -1077,12 +1114,22 @@ function RefList({
                       value={rename.dial ?? ""}
                       onChange={(e) => setRename({ ...rename, dial: e.target.value })}
                     />
+                    <Input
+                      className="w-24"
+                      placeholder="Digits"
+                      title="Expected phone digits (after the dial code)"
+                      value={rename.digits ?? ""}
+                      onChange={(e) => setRename({ ...rename, digits: e.target.value })}
+                    />
                     <Button
                       size="sm"
                       disabled={busy}
                       onClick={async () => {
-                        const body: Record<string, string> = { name: rename.value };
+                        const body: Record<string, string | null> = { name: rename.value };
                         if (rename.dial !== undefined) body.dialCode = rename.dial.replace(/^\+/, "");
+                        if (rename.digits !== undefined) {
+                          body.phoneDigits = rename.digits.trim() ? rename.digits.replace(/\D/g, "") : null;
+                        }
                         const r = await patchRef({ kind: "country", id: c.id, body });
                         if (!r.ok) onToast(r.error || "Could not rename", "destructive");
                         else {
@@ -1102,10 +1149,13 @@ function RefList({
                   <>
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.name}</span>
                     <Badge variant="outline">+{c.dialCode.replace(/^\+/, "")}</Badge>
+                    {c.phoneDigits != null ? (
+                      <span className="text-xs text-muted-foreground">{c.phoneDigits} digits</span>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => setRename({ kind: "country", id: c.id, value: c.name, dial: c.dialCode.replace(/^\+/, "") })}
+                      onClick={() => setRename({ kind: "country", id: c.id, value: c.name, dial: c.dialCode.replace(/^\+/, ""), digits: c.phoneDigits != null ? String(c.phoneDigits) : "" })}
                     >
                       <Pencil className="h-4 w-4" />
                     </Button>

@@ -207,7 +207,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           name: validation.data.name || creatorBefore.name,
           email: validation.data.email,
           phone,
-          niche: validation.data.niche ?? undefined,
+          niche: validation.data.niche?.length ? validation.data.niche : [],
           countryId: validation.data.countryId ?? undefined,
           cityId: validation.data.cityId ?? undefined,
           creatorTypeId: validation.data.creatorTypeId ?? undefined,

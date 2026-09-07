@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Grid2X2, Table2, KanbanSquare, Plus, Search } from "lucide-react";
+import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,6 +18,7 @@ import { CreatorCard, type CreatorListItem } from "@/components/creators/creator
 import { CreatorsTable } from "@/components/creators/creators-table";
 import { KanbanBoard, type KanbanStage } from "@/components/creators/kanban-board";
 import { CreatorFormDialog } from "@/components/creators/creator-form";
+import { ImportCreatorsDialog } from "@/components/creators/creator-import";
 
 type View = "card" | "table" | "kanban";
 
@@ -31,6 +32,7 @@ interface ReferenceData {
   creatorTypes: { id: string; name: string }[];
   fields: { id: string | null; key: string | null; label: string; type: string; options: string[] }[];
   genderOptions: string[];
+  nicheOptions: string[];
   approvalEnabled: boolean;
 }
 
@@ -54,18 +56,21 @@ export default function CreatorsPage() {
     owner: "",
     gender: "",
     shopify: "",
+    niche: "",
     pending: params.get("pending") === "1",
+    incomplete: params.get("incomplete") === "1",
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
-    custom: {} as Record<string, string>,
   });
   const [me, setMe] = React.useState<{
     id: string;
     teamId: string;
+    roleSlug: string;
     canCreate: boolean;
   } | null>(null);
   const [refData, setRefData] = React.useState<ReferenceData | null>(null);
   const [debouncedQ, setDebouncedQ] = React.useState("");
+  const [importOpen, setImportOpen] = React.useState(false);
 
   React.useEffect(() => {
     fetch("/api/me")
@@ -125,12 +130,11 @@ export default function CreatorsPage() {
     if (filters.owner) params.set("owner", filters.owner);
     if (filters.gender) params.set("gender", filters.gender);
     if (filters.shopify) params.set("shopify", filters.shopify);
+    if (filters.niche) params.set("niche", filters.niche);
     if (filters.pending) params.set("pending", "1");
+    if (filters.incomplete) params.set("incomplete", "1");
     if (filters.overdue) params.set("overdue", "1");
     if (filters.upcoming) params.set("upcoming", "1");
-    Object.entries(filters.custom).forEach(([key, value]) => {
-      if (value) params.set(key, value);
-    });
     try {
       const res = await fetch(`/api/creators?${params}`);
       if (!res.ok) return;
@@ -182,6 +186,11 @@ export default function CreatorsPage() {
           {me?.canCreate ? (
             <Button onClick={() => setFormOpen(true)}>
               <Plus className="mr-1 h-4 w-4" /> Add creator
+            </Button>
+          ) : null}
+          {me?.roleSlug === "admin" ? (
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="mr-1 h-4 w-4" /> Import
             </Button>
           ) : null}
         </div>
@@ -286,42 +295,29 @@ export default function CreatorsPage() {
             <SelectItem value="no">Not registered</SelectItem>
           </SelectContent>
         </Select>
-        {refData?.approvalEnabled ? (
-          <Button
-            variant={filters.pending ? "secondary" : "outline"}
-            size="sm"
-            onClick={() => setFilters((f) => ({ ...f, pending: !f.pending }))}
-          >
-            Pending approval{filters.pending ? " ✓" : ""}
-          </Button>
-        ) : null}
-        {(refData?.fields ?? []).map((field) => (
-          <Select
-            key={field.id ?? field.key ?? field.label}
-            value={filters.custom[field.id ?? field.key ?? field.label] ?? ""}
-            onValueChange={(v) =>
-              setFilters((f) => ({
-                ...f,
-                custom: {
-                  ...f.custom,
-                  [field.id ?? field.key ?? field.label]: v === "__clear__" ? "" : v,
-                },
-              }))
-            }
-          >
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder={field.label} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__clear__">All {field.label}</SelectItem>
-              {(field.options ?? []).map((opt) => (
-                <SelectItem key={opt} value={opt}>
-                  {opt}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ))}
+        <Select
+          value={filters.niche}
+          onValueChange={(v) => setFilters((f) => ({ ...f, niche: v }))}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All niches" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all-niche">All niches</SelectItem>
+            {(refData?.nicheOptions ?? []).map((n) => (
+              <SelectItem key={n} value={n}>
+                {n}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant={filters.incomplete ? "secondary" : "outline"}
+          size="sm"
+          onClick={() => setFilters((f) => ({ ...f, incomplete: !f.incomplete }))}
+        >
+          Incomplete data{filters.incomplete ? " ✓" : ""}
+        </Button>
       </div>
 
       {loading ? (
@@ -353,6 +349,12 @@ export default function CreatorsPage() {
           setFilters((f) => ({ ...f }));
           load();
         }}
+      />
+
+      <ImportCreatorsDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onDone={() => load()}
       />
     </div>
   );

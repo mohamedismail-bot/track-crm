@@ -49,6 +49,13 @@ import {
 } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   PlatformBadge,
   DealTypeBadge,
   DeliverableStatusBadge,
@@ -126,7 +133,7 @@ interface ActivityEntry {
 interface CreatorDetail {
   id: string;
   name: string;
-  niche: string | null;
+  niche: string[];
   email: string | null;
   phone: string | null;
   gender: string | null;
@@ -256,6 +263,23 @@ export default function CreatorProfilePage() {
   const [rejectReason, setRejectReason] = React.useState("");
   const [reviewBusy, setReviewBusy] = React.useState(false);
   const [me, setMe] = React.useState<{ id: string; roleSlug: string } | null>(null);
+  const [refData, setRefData] = React.useState<{
+    shopifyMinStageId: string | null;
+    stages: { id: string; name: string; order: number }[];
+  } | null>(null);
+  const [shopifyBusy, setShopifyBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch("/api/reference")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) =>
+        setRefData({
+          shopifyMinStageId: d?.shopifyMinStageId ?? null,
+          stages: d?.stages ?? [],
+        }),
+      )
+      .catch(() => {});
+  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -293,7 +317,7 @@ export default function CreatorProfilePage() {
             creatorTypeId: creator.creatorTypeRef?.id ?? null,
             gender: creator.gender ?? null,
             shopifyRegistered: creator.shopifyRegistered ?? false,
-            niche: creator.niche ?? null,
+            niche: creator.niche ?? [],
             followers: creator.followers,
             engagementRate: creator.engagementRate,
             notes: creator.notes ?? null,
@@ -317,6 +341,24 @@ export default function CreatorProfilePage() {
     creator?.relationship === "same_team_manager" ||
     (creator?.approvalStatus != null && isRequester) ||
     me?.roleSlug === "admin";
+
+  const toggleShopify = async () => {
+    if (!creator || shopifyBusy) return;
+    setShopifyBusy(true);
+    try {
+      const res = await fetch(`/api/creators/${creator.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopifyRegistered: !creator.shopifyRegistered }),
+      });
+      const j = await res.json();
+      if (!res.ok) return toast({ title: j.error ?? "Could not update Shopify status", variant: "destructive" });
+      toast({ title: "Shopify status updated" });
+      await load();
+    } finally {
+      setShopifyBusy(false);
+    }
+  };
 
   const performAvailabilityRequest = async () => {
     const res = await fetch(`/api/creators/${id}/availability-request`, {
@@ -415,6 +457,28 @@ export default function CreatorProfilePage() {
 
   const isOtherTeam = creator.relationship === "other_team";
 
+  const minStageId = refData?.shopifyMinStageId ?? null;
+  const sortOrder = (s: { id: string } | null): number =>
+    s ? refData?.stages.find((st) => st.id === s.id)?.order ?? 0 : 0;
+  const currentEngagement =
+    [...creator.engagements].sort((a, b) => sortOrder(b.stage) - sortOrder(a.stage))[0] ?? null;
+  const currentStage = currentEngagement?.stage ?? null;
+  const shopifyModuleVisible =
+    creator.canViewFull && (!minStageId || sortOrder(currentStage) >= sortOrder(refData?.stages.find((s) => s.id === minStageId) ?? null));
+
+  const moveStage = async (stageId: string) => {
+    if (!currentEngagement || stageId === currentEngagement.stage?.id) return;
+    const res = await fetch(`/api/engagements/${currentEngagement.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "move-stage", stageId }),
+    });
+    const j = await res.json();
+    if (!res.ok) return toast({ title: j.error ?? "Could not move stage", variant: "destructive" });
+    toast({ title: `Moved to ${j.stageName ?? "new stage"}` });
+    await load();
+  };
+
   return (
     <div className="space-y-5">
       <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
@@ -501,12 +565,44 @@ export default function CreatorProfilePage() {
               {creator.poolStatus === "company" ? <Badge>Pool · company</Badge> : null}
               {creator.poolStatus === "same_team" ? <Badge variant="secondary">Pool · team</Badge> : null}
               {creator.relationship === "owned" ? <Badge variant="outline">Owned by me</Badge> : null}
+              {currentStage ? (
+                creator.canMove ? (
+                  <Select value={currentStage.id} onValueChange={(v) => void moveStage(v)}>
+                    <SelectTrigger className="h-6 w-48 px-2 text-xs">
+                      <SelectValue placeholder="Stage" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(refData?.stages ?? []).map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Badge variant="outline">{currentStage.name}</Badge>
+                )
+              ) : null}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              {creator.primaryProfile?.platform ? (
+              {creator.profiles.length ? (
+                creator.profiles.map((p) => (
+                  <a
+                    key={`${p.platform}-${p.handle}`}
+                    href={p.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                    title={`Open ${p.platform.toLowerCase()} profile`}
+                  >
+                    <PlatformBadge platform={p.platform} />
+                    @{p.handle}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ))
+              ) : creator.primaryProfile?.platform ? (
                 <PlatformBadge platform={creator.primaryProfile.platform} />
               ) : null}
-              <span>@{creator.primaryProfile?.handle ?? "—"}</span>
               {creator.followers != null ? <span>{formatFollowerCount(creator.followers)} followers</span> : null}
               {creator.engagementRate != null ? <span>{creator.engagementRate}% ER</span> : null}
               {creator.creatorType ? (
@@ -557,6 +653,38 @@ export default function CreatorProfilePage() {
           </div>
         </CardContent>
       </Card>
+
+      {shopifyModuleVisible ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Store className="h-4 w-4" /> Shopify
+            </CardTitle>
+            <CardDescription>
+              Track this creator&apos;s Shopify store registration. Available once the outreach reaches the
+              minimum stage.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm">
+                {creator.shopifyRegistered ? (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-600">
+                    <CheckCircle2 className="h-4 w-4" /> Registered on Shopify
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Not registered on Shopify</span>
+                )}
+              </span>
+              {canEditProfile ? (
+                <Button size="sm" variant={creator.shopifyRegistered ? "outline" : "default"} onClick={toggleShopify} disabled={shopifyBusy}>
+                  {shopifyBusy ? "Saving…" : creator.shopifyRegistered ? "Mark not registered" : "Mark registered"}
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Dialog open={rejectOpen} onOpenChange={(v) => { setRejectOpen(v); if (!v) setRejectReason(""); }}>
         <DialogContent className="sm:max-w-lg">
@@ -805,7 +933,7 @@ export default function CreatorProfilePage() {
               <Card>
                 <CardContent className="grid gap-x-6 gap-y-3 pt-6 text-sm sm:grid-cols-2">
                   <p className="text-muted-foreground">Niche</p>
-                  <p>{creator.niche ?? "—"}</p>
+                  <p>{creator.niche?.length ? creator.niche.join(", ") : "—"}</p>
                   <p className="text-muted-foreground">Gender</p>
                   <p>{creator.gender ?? "—"}</p>
                   <p className="text-muted-foreground">City / Country</p>

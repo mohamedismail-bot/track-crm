@@ -199,10 +199,11 @@ model TransactionLog {
 // ---------------------------------------------------------------------------
 
 model Country {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  dialCode  String
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  name        String   @unique
+  dialCode    String
+  phoneDigits Int?
+  createdAt   DateTime @default(now())
 
   cities   City[]
   creators Creator[]
@@ -252,7 +253,7 @@ model CreatorField {
 model Creator {
   id            String   @id @default(cuid())
   name          String
-  niche         String?
+  niche         String[]
   email         String?  @unique
   phone         String?  @unique
   gender        String?

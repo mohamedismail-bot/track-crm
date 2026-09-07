@@ -97,15 +97,18 @@ export interface ReferencePayload {
   nicheOptions: string[];
   customFieldsEnabled: boolean;
   approvalEnabled: boolean;
+  shopifyMinStageId: string | null;
+  stages: { id: string; name: string; order: number }[];
 }
 
 export async function getReferencePayload(): Promise<ReferencePayload> {
-  const [countries, creatorTypes, fields, genderOptions, settings] = await Promise.all([
+  const [countries, creatorTypes, fields, genderOptions, settings, stages] = await Promise.all([
     listCountriesWithCities(),
     listCreatorTypes(),
     listCreatorFields(),
     getGenderOptions(),
     getSettings(),
+    prisma.stage.findMany({ orderBy: { order: "asc" } }),
   ]);
   return {
     countries,
@@ -115,6 +118,8 @@ export async function getReferencePayload(): Promise<ReferencePayload> {
     nicheOptions: settings.nicheOptions,
     customFieldsEnabled: settings.customFieldsEnabled,
     approvalEnabled: settings.approvalEnabled,
+    shopifyMinStageId: settings.shopifyMinStageId,
+    stages: stages.map((s) => ({ id: s.id, name: s.name, order: s.order })),
   };
 }
 

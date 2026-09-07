@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
+    "@parishia-smart/shared": "workspace:*",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-checkbox": "^1.3.11",
     "@radix-ui/react-dialog": "^1.1.23",
@@ -30,7 +31,6 @@
     "@radix-ui/react-toast": "^1.2.23",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@tanstack/react-table": "^9.2.4",
-    "@parishia-smart/shared": "workspace:*",
     "@types/bcryptjs": "^3.0.0",
     "@vercel/blob": "^2.8.0",
     "bcryptjs": "^3.0.3",
@@ -44,6 +44,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tailwind-merge": "^3.6.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.5.4"
   },
   "devDependencies": {

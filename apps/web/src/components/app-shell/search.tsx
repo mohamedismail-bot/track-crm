@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Search, Plus, UserPlus } from "lucide-react";
+import { Search, Plus, UserPlus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -68,12 +68,11 @@ export function SearchBox() {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <div className="relative w-full max-w-md">
+      <div className="pointer-events-auto relative w-full max-w-md">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        { }
         <Input
           ref={inputRef}
-          className="pl-8"
+          className="pl-8 pr-8"
           placeholder="Search name, link, @handle, email or phone..."
           value={query}
           onChange={(e) => {
@@ -87,11 +86,32 @@ export function SearchBox() {
             if (e.key === "Escape") setOpen(false);
           }}
         />
+        {query.trim().length >= 2 ? (
+          <button
+            type="button"
+            aria-label="Clear search"
+            tabIndex={-1}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setQuery("");
+              setResults([]);
+              setOpen(false);
+              inputRef.current?.focus();
+            }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
         <DropdownMenuTrigger asChild>
           <button className="sr-only" tabIndex={-1} aria-hidden />
         </DropdownMenuTrigger>
       </div>
-      <DropdownMenuContent align="start" className="w-full max-w-md p-0">
+      <DropdownMenuContent
+        align="start"
+        className="w-full max-w-md p-0"
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         {loading ? (
           <div className="space-y-2 p-3">
             <Skeleton className="h-10 w-full" />

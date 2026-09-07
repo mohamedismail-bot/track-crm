@@ -18,12 +18,13 @@ export interface CreatorListItem {
   name: string;
   gender: string | null;
   shopifyRegistered: boolean | null;
-  niche: string | null;
+  niche: string[];
   followers: number | null;
   engagementRate: number | null;
   platform: Platform | null;
   handle: string | null;
   profileUrl: string | null;
+  profiles: { platform: Platform; handle: string; url: string }[];
   city: string | null;
   country: string | null;
   creatorType: string | null;
@@ -99,10 +100,14 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
             <p className="truncate text-sm font-semibold leading-tight group-hover:underline">
               {creator.name}
             </p>
-            <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-              {creator.platform ? <PlatformBadge platform={creator.platform} /> : null}
-              <span className="truncate">@{creator.handle ?? "—"}</span>
-            </p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1">
+              {creator.profiles.length ? (
+                creator.profiles.map((p) => <PlatformBadge key={`${p.platform}-${p.handle}`} platform={p.platform} />)
+              ) : creator.platform ? (
+                <PlatformBadge platform={creator.platform} />
+              ) : null}
+              <span className="truncate text-xs text-muted-foreground">@{creator.handle ?? "—"}</span>
+            </div>
           </div>
         </div>
         {creator.stage ? (
@@ -122,8 +127,8 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
         ) : null}
       </div>
 
-      {creator.niche ? (
-        <p className="line-clamp-1 text-xs text-muted-foreground">{creator.niche}</p>
+      {creator.niche?.length ? (
+        <p className="line-clamp-1 text-xs text-muted-foreground">{creator.niche.join(", ")}</p>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

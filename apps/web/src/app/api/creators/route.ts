@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
     pending: params.get("pending") === "1",
+    incomplete: params.get("incomplete") === "1",
     gender: params.get("gender") ?? "",
     shopify,
     country: params.get("country") ?? "",

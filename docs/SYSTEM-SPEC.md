@@ -284,7 +284,7 @@ ActivityLog is chronological. All users in the same team see the full log. Unass
 
 ## 12. Global Search
 
-Top navigation search bar: searches by Creator name, Platform Profile name, or Platform Handle/URL.
+Top navigation search bar and the Creators list search box: smart search accepts a Creator name, a bare handle, an `@`-handle, a pasted platform link, an email, or a phone number. Every field matches partially (contains). Pasted links and `@`-handles are parsed into a canonical **Platform Handle** before matching platform profiles (`normalizedHandle`), so `mohamedismail`, `@mohamedismail`, and `https://www.instagram.com/mohamedismail` all find the same Creator.
 
 | Result | Behavior |
 |---|---|

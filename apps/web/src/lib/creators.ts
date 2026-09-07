@@ -33,7 +33,7 @@ export interface CreateCreatorInput {
   creatorTypeId?: string;
   gender?: string;
   shopifyRegistered?: boolean;
-  niche?: string;
+  niche?: string[];
   followers?: string | number;
   engagementRate?: string | number;
   notes?: string;
@@ -45,6 +45,16 @@ export function parseNumeric(value: string | number | undefined): number | null 
   if (value === undefined || value === null || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Normalise a niche selection: dedupe, trim, drop empties. */
+export function normalizeNiche(value: string[] | string | null | undefined): string[] {
+  const list = Array.isArray(value)
+    ? value
+    : value === null || value === undefined || value === ""
+      ? []
+      : [value];
+  return Array.from(new Set(list.map((v) => String(v).trim()).filter(Boolean)));
 }
 
 export interface ValidatedProfile {
@@ -96,12 +106,12 @@ export interface ValidationResult {
     creatorTypeId: string | null;
     gender: string | null;
     shopifyRegistered: boolean | null;
-    niche: string | null;
+    niche: string[];
     followers: number | null;
     engagementRate: number | null;
     notes: string | null;
     customFields: Record<string, string | number | boolean | null>;
-    phoneCountryRow: { id: string; dialCode: string; name: string } | null;
+    phoneCountryRow: { id: string; dialCode: string; name: string; phoneDigits: number | null } | null;
   };
   profiles: ValidatedProfile[];
   erroredMissingRequired: string[];
@@ -115,7 +125,7 @@ const SYSTEM_REQUIRED_VALUE_KEY: Record<string, (d: ValidationResult["data"]) =>
   city: (d) => !!d.cityId,
   creatorType: (d) => !!d.creatorTypeId,
   shopifyRegistered: (d) => d.shopifyRegistered !== null,
-  niche: (d) => !!d.niche,
+  niche: (d) => (d.niche?.length ?? 0) > 0,
   followers: (d) => d.followers !== null,
   engagementRate: (d) => d.engagementRate !== null,
   notes: (d) => !!d.notes,
@@ -157,7 +167,11 @@ export async function validateCreatorInput(
         errors.push("The selected dial-code country is not valid.");
       } else {
         phone = buildE164(phoneCountryRow.dialCode, digits);
-        if (!isValidE164(phone)) {
+        if (phoneCountryRow.phoneDigits != null && digits.length !== phoneCountryRow.phoneDigits) {
+          errors.push(
+            `${phoneCountryRow.name} phone numbers must have exactly ${phoneCountryRow.phoneDigits} digits (after the dial code).`,
+          );
+        } else if (!isValidE164(phone)) {
           errors.push("Phone must be between 8 and 15 digits.");
         }
       }
@@ -227,7 +241,7 @@ export async function validateCreatorInput(
     creatorTypeId,
     gender,
     shopifyRegistered: input.shopifyRegistered ?? null,
-    niche: input.niche?.trim() || null,
+    niche: normalizeNiche(input.niche),
     followers: parseNumeric(input.followers),
     engagementRate: parseNumeric(input.engagementRate),
     notes: input.notes?.trim() || null,
@@ -504,6 +518,7 @@ export interface CreatorListFilters {
   overdue?: boolean;
   upcoming?: boolean;
   pending?: boolean;
+  incomplete?: boolean;
   gender?: string;
   shopify?: "yes" | "no";
   country?: string;
@@ -567,7 +582,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
   const where: Prisma.CreatorWhereInput = {
     deletedAt: null,
     ...(filters.q ? smartSearchWhere(filters.q) : {}),
-    ...(filters.niche ? { niche: { contains: filters.niche } } : {}),
+    ...(filters.niche ? { niche: { has: filters.niche } } : {}),
     ...(filters.platform ? { profiles: { some: { platform: filters.platform as Platform } } } : {}),
     ...(filters.owner ? { ownerships: { some: { userId: filters.owner } } } : {}),
     ...(filters.stage ? { engagements: { some: { stageId: filters.stage } } } : {}),
@@ -603,6 +618,13 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
     ...(filters.pending
       ? { approvalStatus: { in: ["PENDING", "REJECTED"] } }
       : { approvalStatus: null }),
+    ...(filters.incomplete ? { OR: [
+        { countryId: null },
+        { cityId: null },
+        { creatorTypeId: null },
+        { phone: null },
+        { phone: "" },
+      ] } : {}),
   };
   if (fieldFilters.length) where.AND = fieldFilters;
 
@@ -678,6 +700,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
         platform: c.primaryProfile?.platform ?? c.profiles[0]?.platform ?? null,
         handle: c.primaryProfile?.handle ?? c.profiles[0]?.handle ?? null,
         profileUrl: c.primaryProfile?.url ?? c.profiles[0]?.url ?? null,
+        profiles: c.profiles.map((p) => ({ platform: p.platform, handle: p.handle, url: p.url })),
         city: c.cityRef?.name ?? c.city,
         country: c.countryRef?.name ?? c.country,
         creatorType: c.creatorTypeRef?.name ?? c.creatorType,

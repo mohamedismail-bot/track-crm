@@ -192,7 +192,7 @@ async function main() {
         const creator = await prisma.creator.create({
           data: {
             name: c.name,
-            niche: c.niche,
+            niche: [c.niche],
             followers: c.followers,
             engagementRate: c.engRate,
             createdById: admin.id,

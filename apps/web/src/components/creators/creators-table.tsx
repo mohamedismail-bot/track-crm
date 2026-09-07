@@ -55,10 +55,17 @@ function columns(): LegacyColumnDef<TableRow>[] {
     },
     {
       accessorKey: "platform",
-      header: "Platform",
-      cell: ({ getValue }: CellCtx) => {
-        const v = getValue() as TableRow["platform"];
-        return v ? <PlatformBadge platform={v} /> : null;
+      header: "Platforms",
+      cell: ({ row }: CellCtx) => {
+        const c = row.original;
+        if (!c.profiles.length) return null;
+        return (
+          <span className="inline-flex flex-wrap gap-1">
+            {c.profiles.map((p) => (
+              <PlatformBadge key={`${p.platform}-${p.handle}`} platform={p.platform} />
+            ))}
+          </span>
+        );
       },
     },
     {
@@ -77,9 +84,10 @@ function columns(): LegacyColumnDef<TableRow>[] {
     {
       accessorKey: "niche",
       header: "Niche",
-      cell: ({ getValue }: CellCtx) => (
-        <span className="text-muted-foreground">{(getValue() as string | null) ?? "—"}</span>
-      ),
+      cell: ({ getValue }: CellCtx) => {
+        const v = getValue() as string[] | null | undefined;
+        return <span className="text-muted-foreground">{v?.length ? v.join(", ") : "—"}</span>;
+      },
     },
     {
       accessorKey: "stage",

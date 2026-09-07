@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Star, Trash2, Loader2 } from "lucide-react";
 import {
   Dialog,
@@ -50,6 +51,7 @@ interface ReferenceCountry {
   id: string;
   name: string;
   dialCode: string;
+  phoneDigits: number | null;
   cities: { id: string; name: string }[];
 }
 interface ReferenceField {
@@ -88,7 +90,7 @@ export interface EditableCreatorInput {
   creatorTypeId: string | null;
   gender: string | null;
   shopifyRegistered: boolean | null;
-  niche: string | null;
+  niche: string[] | null;
   followers: number | null;
   engagementRate: number | null;
   notes: string | null;
@@ -130,8 +132,8 @@ export function CreatorFormDialog({
   const [countryId, setCountryId] = React.useState("");
   const [cityId, setCityId] = React.useState("");
   const [creatorTypeId, setCreatorTypeId] = React.useState("");
-  const [shopify, setShopify] = React.useState(false);
-  const [niche, setNiche] = React.useState("");
+  const [niche, setNiche] = React.useState<string[]>([]);
+  const [customNiche, setCustomNiche] = React.useState("");
   const [followers, setFollowers] = React.useState("");
   const [engagementRate, setEngagementRate] = React.useState("");
   const [notes, setNotes] = React.useState("");
@@ -139,7 +141,7 @@ export function CreatorFormDialog({
   const [profiles, setProfiles] = React.useState<ProfileRow[]>([]);
 
   // Inline duplicate-check state (per profile row index).
-  const [dupChecks, setDupChecks] = React.useState<Record<number, { state: "idle" | "checking" | "ok" | "dup"; text?: string; url?: string; self?: boolean }>>({});
+  const [dupChecks, setDupChecks] = React.useState<Record<number, { state: "idle" | "checking" | "ok" | "dup"; text?: string; url?: string; creatorId?: string; self?: boolean }>>({});
   const [emailDup, setEmailDup] = React.useState<null | { exists: boolean; self?: boolean }>(null);
   const [phoneDup, setPhoneDup] = React.useState<null | { exists: boolean; self?: boolean }>(null);
 
@@ -158,8 +160,7 @@ export function CreatorFormDialog({
       setName(initial.name ?? "");
       setGender(initial.gender ?? "");
       setEmail(initial.email ?? "");
-      setShopify(initial.shopifyRegistered ?? false);
-      setNiche(initial.niche ?? "");
+      setNiche(Array.isArray(initial.niche) ? initial.niche : []);
       setFollowers(initial.followers?.toString() ?? "");
       setEngagementRate(initial.engagementRate?.toString() ?? "");
       setNotes(initial.notes ?? "");
@@ -251,7 +252,7 @@ export function CreatorFormDialog({
             if (res.ok && j.exists && !j.isSelf) {
               setDupChecks((d) => ({
                 ...d,
-                [i]: { state: "dup", text: `Already linked to ${j.name}`, url: j.url },
+                [i]: { state: "dup", text: `Already linked to ${j.name}`, url: j.url, creatorId: j.creatorId },
               }));
             } else {
               setDupChecks((d) => ({ ...d, [i]: { state: "ok" } }));
@@ -336,8 +337,7 @@ export function CreatorFormDialog({
       cityId: cityId || undefined,
       creatorTypeId: creatorTypeId || undefined,
       gender: gender || undefined,
-      shopifyRegistered: shopify,
-      niche: niche.trim() || undefined,
+      niche: niche.length ? niche : undefined,
       followers: followers ? Number(followers) : undefined,
       engagementRate: engagementRate ? Number(engagementRate) : undefined,
       notes: notes.trim() || undefined,
@@ -460,7 +460,11 @@ export function CreatorFormDialog({
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                {phonePreview ? `Stored as ${phonePreview}` : "Digits only — no spaces or dashes."}
+                {countryOf(phoneCountryId)?.phoneDigits != null
+                  ? `${countryOf(phoneCountryId)!.name} phone numbers have exactly ${countryOf(phoneCountryId)!.phoneDigits} digits after the dial code.`
+                  : phonePreview
+                    ? `Stored as ${phonePreview}`
+                    : "Digits only — no spaces or dashes."}
               </p>
               {phoneDup ? <p className="text-xs text-destructive">A creator with this phone already exists.</p> : null}
             </div>
@@ -531,36 +535,70 @@ export function CreatorFormDialog({
               <Label htmlFor="cf-er">Engagement rate (%)</Label>
               <Input id="cf-er" type="number" step="0.1" value={engagementRate} onChange={(e) => setEngagementRate(e.target.value)} placeholder="3.5" />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cf-shopify" className="inline-flex items-center gap-2 pt-6">
-                <input
-                  id="cf-shopify"
-                  type="checkbox"
-                  className="h-4 w-4 accent-primary"
-                  checked={shopify}
-                  onChange={(e) => setShopify(e.target.checked)}
-                />
-                Registered on Shopify
-              </Label>
-            </div>
             <div className="space-y-1.5 sm:col-span-3">
               <Label htmlFor="cf-niche" className="inline-flex items-center gap-1">
                 Niche{" "}
                 {requiredFields.some((f) => f.key === "niche") ? <span className="text-destructive">*</span> : null}
               </Label>
-              <Select value={niche} onValueChange={setNiche}>
-                <SelectTrigger id="cf-niche">
-                  <SelectValue placeholder={nicheOptions.length ? "Select niche" : "No niche options yet"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {niche && !nicheOptions.includes(niche) ? <SelectItem value={niche}>{niche}</SelectItem> : null}
-                  {nicheOptions.map((o) => (
-                    <SelectItem key={o} value={o}>
+              <div className="flex flex-wrap gap-1.5">
+                {nicheOptions.map((o) => {
+                  const active = niche.includes(o);
+                  return (
+                    <Button
+                      key={o}
+                      type="button"
+                      size="sm"
+                      variant={active ? "default" : "outline"}
+                      onClick={() =>
+                        setNiche((prev) => (prev.includes(o) ? prev.filter((n) => n !== o) : [...prev, o]))
+                      }
+                    >
                       {o}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                    </Button>
+                  );
+                })}
+                {niche.filter((n) => !nicheOptions.includes(n)).map((o) => (
+                  <Button
+                    key={o}
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setNiche((prev) => prev.filter((n) => n !== o))}
+                  >
+                    {o} ×
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="cf-niche"
+                  value={customNiche}
+                  onChange={(e) => setCustomNiche(e.target.value)}
+                  placeholder={nicheOptions.length ? "Add a custom niche…" : "Type a niche…"}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const v = customNiche.trim();
+                      if (v && !niche.includes(v)) setNiche((prev) => [...prev, v]);
+                      setCustomNiche("");
+                    }
+                  }}
+                  className="max-w-xs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const v = customNiche.trim();
+                    if (v && !niche.includes(v)) setNiche((prev) => [...prev, v]);
+                    setCustomNiche("");
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+              {niche.length ? <p className="text-xs text-muted-foreground">{niche.join(", ")}</p> : null}
               {!nicheOptions.length ? (
                 <p className="text-xs text-muted-foreground">
                   Add niche options in Workspace settings → Creator fields.
@@ -661,10 +699,14 @@ export function CreatorFormDialog({
                   ) : check?.state === "dup" ? (
                     <p className="inline-flex items-center gap-2 text-xs text-destructive">
                       {check.text}
-                      {check.url ? (
-                        <a href={check.url} target="_blank" rel="noreferrer" className="text-primary underline">
+                      {check.creatorId ? (
+                        <Link
+                          href={`/creators/${check.creatorId}`}
+                          className="text-primary underline underline-offset-2"
+                          onClick={() => onOpenChange(false)}
+                        >
                           View profile →
-                        </a>
+                        </Link>
                       ) : null}
                     </p>
                   ) : null}

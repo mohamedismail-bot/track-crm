@@ -103,6 +103,14 @@ export async function PUT(req: NextRequest) {
     }
     entries[SETTING_KEYS.GIFT_MIN_STAGE_ID] = stageId === "none" ? "" : stageId;
   }
+  if (body.shopifyMinStageId !== undefined) {
+    const stageId = String(body.shopifyMinStageId ?? "");
+    if (stageId && stageId !== "none") {
+      const stage = await prisma.stage.findUnique({ where: { id: stageId } });
+      if (!stage) return jsonError("Invalid minimum Shopify stage.", 400);
+    }
+    entries[SETTING_KEYS.SHOPIFY_MIN_STAGE_ID] = stageId === "none" ? "" : stageId;
+  }
   if (body.exportEnabledRoles !== undefined)
     entries[SETTING_KEYS.EXPORT_ENABLED_ROLES] = JSON.stringify(body.exportEnabledRoles ?? []);
   if (body.passwordMinLength !== undefined) {
