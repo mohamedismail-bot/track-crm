@@ -87,6 +87,7 @@ interface OwnerOption {
   displayName: string;
   teamId: string | null;
   teamName: string | null;
+  roleSlug: string;
 }
 
 interface ProfileRow {
@@ -151,6 +152,7 @@ export function CreatorFormDialog({
   const [niche, setNiche] = React.useState<string[]>([]);
   const [ownerIds, setOwnerIds] = React.useState<string[]>([]);
   const [ownerOptions, setOwnerOptions] = React.useState<OwnerOption[]>([]);
+  const [hardOwnerIds, setHardOwnerIds] = React.useState<string[]>([]);
   const [me, setMe] = React.useState<{ id: string; teamId: string | null } | null>(null);
   const [followers, setFollowers] = React.useState("");
   const [engagementRate, setEngagementRate] = React.useState("");
@@ -187,17 +189,28 @@ export function CreatorFormDialog({
         .catch(() => null);
       if (cancelled) return;
       const owners: OwnerOption[] = (opts?.owners ?? []).map(
-        (o: { id: string; displayName: string; teamId: string }) => ({
+        (o: { id: string; displayName: string; teamId: string; roleSlug: string }) => ({
           id: o.id,
           displayName: o.displayName,
           teamId: o.teamId ?? null,
           teamName: null,
+          roleSlug: o.roleSlug ?? "",
         }),
       );
       setOwnerOptions(owners);
+      // Admin(s) and the acting user's Team Manager(s) are always owners on the
+      // backend — mirror that in the form as locked, non-removable selections.
+      const hard = owners
+        .filter(
+          (o) =>
+            o.roleSlug === "admin" ||
+            (o.roleSlug === "team-manager" && o.teamId === (me?.teamId ?? null)),
+        )
+        .map((o) => o.id);
+      setHardOwnerIds(hard);
       if (me?.id) {
         setMe((prev) => prev ?? { id: me.id, teamId: me.teamId ?? null });
-        setOwnerIds((prev) => (prev.length ? prev : [me.id]));
+        setOwnerIds((prev) => Array.from(new Set([...(prev.length ? prev : [me.id]), ...hard])));
       }
       const stageList = (opts?.stages ?? []) as { id: string; name: string }[];
       setStages(stageList);
@@ -272,9 +285,9 @@ export function CreatorFormDialog({
   const lockedProtected = mode === "edit" && initial?.canEditProtected === false;
   const emailLocked = mode === "edit" && initial?.canEditProtected === false && !!initial?.email;
   const ownerAssignable: MultiSelectOption[] = (me?.teamId
-    ? ownerOptions.filter((o) => o.teamId === me.teamId)
+    ? ownerOptions.filter((o) => o.teamId === me.teamId || hardOwnerIds.includes(o.id))
     : ownerOptions
-  ).map((o) => ({ value: o.id, label: o.displayName }));
+  ).map((o) => ({ value: o.id, label: o.displayName, locked: hardOwnerIds.includes(o.id) }));
 
   React.useEffect(() => {
     if (!countryId) return;
@@ -306,6 +319,39 @@ export function CreatorFormDialog({
     });
     return map;
   }, [profiles]);
+
+  // Phone duplicate check. A number is only compared once it is COMPLETE: when
+  // the country defines an exact length the check waits for that many digits;
+  // when the length is unknown there is no meaningful "done" moment while
+  // typing, so the check is deferred to blur — never mid-typing.
+  const runPhoneDupCheck = React.useCallback(
+    async (
+      preview: string,
+      digits: string,
+      expected: number | null,
+      opts?: { allowPartial?: boolean },
+    ) => {
+      if (!preview) {
+        setPhoneDup(null);
+        return;
+      }
+      if (expected != null && digits.length !== expected) {
+        setPhoneDup(null);
+        return;
+      }
+      if (expected == null && !opts?.allowPartial && digits.length < 6) {
+        setPhoneDup(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/creators/check?platform=PHONE&handle=${encodeURIComponent(preview)}${initial?.id ? `&exclude=${initial.id}` : ""}`);
+        const j = await res.json();
+        if (res.ok && j.exists && !j.isSelf) setPhoneDup({ exists: true });
+        else setPhoneDup(null);
+      } catch {}
+    },
+    [initial],
+  );
 
   // Debounced inline duplicate checks per row + email + phone.
   React.useEffect(() => {
@@ -352,32 +398,15 @@ export function CreatorFormDialog({
         else setEmailDup(null);
       } catch {}
     }, 400);
-    const phoneTimer = setTimeout(async () => {
-      if (!phonePreview) {
-        setPhoneDup(null);
-        return;
-      }
-      // Gate: only check when entered digits match the country's expected length
-      // (or when country has no defined length and digits are at least 6).
-      const expected = dialCountry?.phoneDigits;
-      if (expected != null && phoneDigitsClean.length !== expected) {
-        setPhoneDup(null);
-        return;
-      }
-      if (expected == null && phoneDigitsClean.length < 6) {
-        setPhoneDup(null);
-        return;
-      }
-      try {
-        const res = await fetch(`/api/creators/check?platform=PHONE&handle=${encodeURIComponent(phonePreview)}${initial?.id ? `&exclude=${initial.id}` : ""}`);
-        const j = await res.json();
-        if (res.ok && j.exists && !j.isSelf) setPhoneDup({ exists: true });
-        else setPhoneDup(null);
-      } catch {}
-    }, 400);
-    timers.push(emailTimer, phoneTimer);
+    if (dialCountry?.phoneDigits == null) {
+      // Unknown country length: never flag mid-typing; the blur handler checks.
+      setPhoneDup(null);
+    } else {
+      timers.push(setTimeout(() => void runPhoneDupCheck(phonePreview, phoneDigitsClean, dialCountry.phoneDigits), 400));
+    }
+    timers.push(emailTimer);
     return () => timers.forEach(clearTimeout);
-  }, [profiles, mutedRows, email, phonePreview, phoneDigitsClean, dialCountry, initial?.id]);
+  }, [profiles, mutedRows, email, phonePreview, phoneDigitsClean, dialCountry, initial?.id, runPhoneDupCheck]);
 
   const validateLocal = (): string | null => {
     if (!name.trim()) return "Creator name is required.";
@@ -393,6 +422,7 @@ export function CreatorFormDialog({
     if (digits && dialCountry?.phoneDigits != null && digits.length !== dialCountry.phoneDigits) {
       return `${dialCountry.name} phone numbers must have exactly ${dialCountry.phoneDigits} digits (after the dial code).`;
     }
+    if (phoneDup?.exists) return "A creator with this phone already exists.";
     for (const [i, p] of profiles.entries()) {
       const trimmed = p.input.trim();
       if (!trimmed) continue;
@@ -510,7 +540,7 @@ export function CreatorFormDialog({
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add creator" : `Edit ${initial?.name ?? "creator"}`}</DialogTitle>
           <DialogDescription>
-            Track the person, not the profile. Platform handles accept bare, @-prefixed or full links.
+            Track the person, not the profile. Platform profiles accept links only — paste the full profile link (e.g. instagram.com/handle).
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-6">
@@ -578,7 +608,17 @@ export function CreatorFormDialog({
                   id="cf-phone"
                   inputMode="numeric"
                   value={phoneDigits}
-                  onChange={(e) => setPhoneDigits(e.target.value.replace(/[^\d]/g, ""))}
+                  onChange={(e) => {
+                    setPhoneDigits(e.target.value.replace(/[^\d]/g, ""));
+                    setPhoneDup(null);
+                  }}
+                  onBlur={() => {
+                    if (phonePreview) {
+                      void runPhoneDupCheck(phonePreview, phoneDigitsClean, dialCountry?.phoneDigits ?? null, {
+                        allowPartial: true,
+                      });
+                    }
+                  }}
                   placeholder="1001234567 (digits only)"
                   aria-invalid={phoneDigitsMismatch}
                   className={phoneDigitsMismatch ? "border-destructive" : ""}
@@ -720,7 +760,7 @@ export function CreatorFormDialog({
                 placeholder="Select team members…"
               />
               <p className="text-xs text-muted-foreground">
-                Who should work this creator. Multiple owners are allowed when the workspace enables it.
+                Who should work this creator. Admins and the Team Manager are always assigned (locked); multiple owners are allowed when the workspace enables it.
               </p>
             </div>
           ) : null}
@@ -793,7 +833,7 @@ export function CreatorFormDialog({
                     <Input
                       value={row.input}
                       onChange={(e) => setProfile(i, { input: e.target.value })}
-                      placeholder={row.platform === "OTHER" ? "e.g. https://tiktok.com/@myname or @myname" : `e.g. @handle or a ${PLATFORM_LABELS[row.platform].toLowerCase()} link`}
+                      placeholder={row.platform === "OTHER" ? "e.g. https://tiktok.com/@myname" : `e.g. https://www.${PLATFORM_LABELS[row.platform].toLowerCase()}.com/handle`}
                       disabled={lockedProtected}
                       aria-invalid={!!muted || !!showError}
                       className={muted || showError ? "border-destructive" : ""}

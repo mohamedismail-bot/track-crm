@@ -159,6 +159,7 @@ export const SETTING_KEYS = {
   GIFT_MIN_STAGE_ID: "gift.minStageId",
   SHOPIFY_MIN_STAGE_ID: "shopify.minStageId",
   EXPORT_ENABLED_ROLES: "export.enabledRoles",
+  EXPORT_ENABLED_USER_IDS: "export.enabledUserIds",
   PASSWORD_MIN_LENGTH: "password.minLength",
   PASSWORD_COMPLEXITY: "password.complexity",
   GENDER_OPTIONS: "creator.genderOptions",
@@ -296,6 +297,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   [SETTING_KEYS.GIFT_MIN_STAGE_ID]: "",
   [SETTING_KEYS.SHOPIFY_MIN_STAGE_ID]: "",
   [SETTING_KEYS.EXPORT_ENABLED_ROLES]: "[]",
+  [SETTING_KEYS.EXPORT_ENABLED_USER_IDS]: "[]",
   [SETTING_KEYS.PASSWORD_MIN_LENGTH]: "8",
   [SETTING_KEYS.PASSWORD_COMPLEXITY]: "false",
   [SETTING_KEYS.GENDER_OPTIONS]: '["Male","Female","Other","Prefer not to say"]',
@@ -492,20 +494,17 @@ export function urlPlatformMismatch(input: string, selected: Platform): Platform
 }
 
 /**
- * Strict platform-profile entry check: interactive entries must start with
- * `@` or be a full link. Returns a user-facing error message, or null when OK.
+ * Strict platform-profile entry check: platform profiles must be a full link
+ * (e.g. `https://www.instagram.com/handle` or `www.instagram.com/handle`).
+ * The handle itself is derived from the last path segment of the link.
+ * Returns a user-facing error message, or null when OK.
  */
 export function strictProfileEntryError(input: string): string | null {
   const trimmed = input.trim();
-  if (!trimmed) return "Every platform profile needs a handle.";
+  if (!trimmed) return "Every platform profile needs a link.";
+  if (/[\s]/.test(trimmed)) return "Paste the full profile link without spaces.";
   if (looksLikeUrl(trimmed)) return null;
-  if (!trimmed.startsWith("@")) {
-    return "Start with “@” (e.g. @handle) or paste a full link (e.g. https://instagram.com/handle).";
-  }
-  const cleaned = trimmed.replace(/^@+/, "").trim();
-  if (!cleaned) return "Enter a handle after “@”.";
-  if (/[\s/]/.test(cleaned)) return "A handle cannot contain spaces or slashes.";
-  return null;
+  return "Paste the full profile link (e.g. https://www.instagram.com/handle).";
 }
 
 export function isValidEmail(email: string): boolean {

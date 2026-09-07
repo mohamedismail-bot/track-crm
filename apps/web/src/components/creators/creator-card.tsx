@@ -157,26 +157,11 @@ export function StageDropdown({
   );
 }
 
-function StoryRingAvatar({ name, incomplete }: { name: string; incomplete: boolean }) {
-  if (!incomplete) {
-    return (
-      <Avatar className="h-10 w-10 ring-1 ring-border">
-        <AvatarFallback>{initials(name)}</AvatarFallback>
-      </Avatar>
-    );
-  }
+function StoryRingAvatar({ name }: { name: string }) {
   return (
-    <span className="relative inline-flex">
-      <span
-        className="absolute -inset-[3px] rounded-full"
-        style={{
-          background: "linear-gradient(135deg, #f59e0b 0%, #ef4444 30%, #ec4899 60%, #8b5cf6 100%)",
-        }}
-      />
-      <Avatar className="relative h-10 w-10 ring-2 ring-card">
-        <AvatarFallback>{initials(name)}</AvatarFallback>
-      </Avatar>
-    </span>
+    <Avatar className="h-10 w-10 ring-1 ring-border">
+      <AvatarFallback>{initials(name)}</AvatarFallback>
+    </Avatar>
   );
 }
 
@@ -192,7 +177,7 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
       <div className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-3">
-            <StoryRingAvatar name={creator.name} incomplete={creator.incompleteData} />
+            <StoryRingAvatar name={creator.name} />
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <Link href={`/creators/${creator.id}`} className="truncate text-sm font-semibold leading-tight hover:underline">
@@ -231,6 +216,7 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
 
         <div className="flex flex-wrap gap-1">
           {approvalBadge(creator)}
+          {incompleteBadge(creator)}
           {creator.shopifyRegistered ? (
             <Badge variant="secondary" className="gap-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-50">
               <span className="inline-flex h-3 w-3 items-center justify-center">

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { PERMISSIONS } from "@/lib/constants";
+import { canExportCreators } from "@/lib/creators";
 
 export async function GET() {
   const user = await getSessionUser();
@@ -17,5 +18,6 @@ export async function GET() {
     roleSlug: user.roleSlug,
     permissions: user.permissions,
     canCreate: user.permissions.includes(PERMISSIONS.CREATOR_CREATE),
+    canExport: await canExportCreators(user),
   });
 }

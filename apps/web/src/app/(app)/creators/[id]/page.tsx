@@ -56,7 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  PlatformBadge,
+  PlatformLogoIcon,
   DealTypeBadge,
   DeliverableStatusBadge,
   GiftStatusBadge,
@@ -594,16 +594,15 @@ export default function CreatorProfilePage() {
                     href={p.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-primary hover:underline"
-                    title={`Open ${p.platform.toLowerCase()} profile`}
+                    className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
+                    title={`@${p.handle} on ${p.platform}`}
                   >
-                    <PlatformBadge platform={p.platform} />
-                    @{p.handle}
-                    <ExternalLink className="h-3 w-3" />
+                    <PlatformLogoIcon platform={p.platform} size={15} />
+                    <span className="sr-only">@{p.handle}</span>
                   </a>
                 ))
               ) : creator.primaryProfile?.platform ? (
-                <PlatformBadge platform={creator.primaryProfile.platform} />
+                <PlatformLogoIcon platform={creator.primaryProfile.platform} size={15} />
               ) : null}
               {creator.followers != null && (isOtherTeam ? (creator.unassignedVisibleFields ?? []).includes("followers") : true) ? (
                 <span>{formatFollowerCount(creator.followers)} followers</span>
@@ -781,8 +780,8 @@ export default function CreatorProfilePage() {
                           {a.author?.displayName ?? "System"} · {timeAgo(a.loggedAt)}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm font-medium">{a.summary}</p>
-                      {a.description ? <p className="mt-1 text-xs text-muted-foreground">{a.description}</p> : null}
+                      <p className="mt-2 text-sm font-medium break-words">{a.summary}</p>
+                      {a.description ? <p className="mt-1 text-xs text-muted-foreground break-words">{a.description}</p> : null}
                       {a.attachments.length ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {a.attachments.map((att) => (
@@ -934,7 +933,7 @@ export default function CreatorProfilePage() {
                     ))}
                   </div>
                   <p className="text-muted-foreground">Notes</p>
-                  <p className="whitespace-pre-wrap">{creator.notes ?? "—"}</p>
+                  <p className="whitespace-pre-wrap break-words">{creator.notes ?? "—"}</p>
                   <p className="text-muted-foreground col-span-full mt-2 border-t pt-3 flex items-center gap-1">
                     <Calendar className="h-3.5 w-3.5" /> Platform profiles
                   </p>
@@ -945,10 +944,12 @@ export default function CreatorProfilePage() {
                         href={p.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent"
+                        title={p.handle ? `@${p.handle} on ${p.platform}` : p.platform}
+                        className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-accent"
                       >
-                        <PlatformBadge platform={p.platform} /> @{p.handle}
-                        {p.isPrimary ? <Badge variant="secondary" className="ml-1">primary</Badge> : null}
+                        <PlatformLogoIcon platform={p.platform} size={14} />
+                        {p.isPrimary ? <Badge variant="secondary">primary</Badge> : null}
+                        <span className="sr-only">@{p.handle}</span>
                       </a>
                     ))}
                   </div>

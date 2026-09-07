@@ -113,6 +113,8 @@ export async function PUT(req: NextRequest) {
   }
   if (body.exportEnabledRoles !== undefined)
     entries[SETTING_KEYS.EXPORT_ENABLED_ROLES] = JSON.stringify(body.exportEnabledRoles ?? []);
+  if (body.exportEnabledUserIds !== undefined)
+    entries[SETTING_KEYS.EXPORT_ENABLED_USER_IDS] = JSON.stringify(body.exportEnabledUserIds ?? []);
   if (body.passwordMinLength !== undefined) {
     const n = Number(body.passwordMinLength);
     if (!Number.isFinite(n) || n < 6) return jsonError("Minimum password length must be at least 6.", 400);

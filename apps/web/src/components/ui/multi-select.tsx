@@ -2,12 +2,14 @@
 
 import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { Check, ChevronsUpDown, X } from "lucide-react";
+import { Check, ChevronsUpDown, Lock, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface MultiSelectOption {
   value: string;
   label: string;
+  /** When true the option cannot be removed once selected (e.g. auto-assigned owners). */
+  locked?: boolean;
 }
 
 export function MultiSelect({
@@ -27,8 +29,10 @@ export function MultiSelect({
 }) {
   const [open, setOpen] = React.useState(false);
   const selected = options.filter((o) => value.includes(o.value));
+  const lockedValues = new Set(options.filter((o) => o.locked).map((o) => o.value));
 
-  const toggle = (optionValue: string) => {
+  const toggle = (optionValue: string, locked: boolean) => {
+    if (locked && value.includes(optionValue)) return;
     onChange(value.includes(optionValue) ? value.filter((v) => v !== optionValue) : [...value, optionValue]);
   };
 
@@ -45,21 +49,28 @@ export function MultiSelect({
         >
           <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {selected.length ? (
-              selected.map((o) => (
-                <span
-                  key={o.value}
-                  className="inline-flex max-w-full items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-xs font-medium text-secondary-foreground"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggle(o.value);
-                  }}
-                  title="Click to remove"
-                >
-                  <span className="truncate">{o.label}</span>
-                  <X className="h-3 w-3 shrink-0" />
-                </span>
-              ))
+              selected.map((o) => {
+                const locked = lockedValues.has(o.value);
+                return (
+                  <span
+                    key={o.value}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 text-xs font-medium text-secondary-foreground"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!locked) toggle(o.value, false);
+                    }}
+                    title={locked ? "Always assigned" : "Click to remove"}
+                  >
+                    <span className="truncate">{o.label}</span>
+                    {locked ? (
+                      <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <X className="h-3 w-3 shrink-0" />
+                    )}
+                  </span>
+                );
+              })
             ) : (
               <span className="truncate">{placeholder}</span>
             )}
@@ -79,11 +90,12 @@ export function MultiSelect({
           ) : (
             options.map((o) => {
               const checked = value.includes(o.value);
+              const locked = lockedValues.has(o.value);
               return (
                 <button
                   key={o.value}
                   type="button"
-                  onClick={() => toggle(o.value)}
+                  onClick={() => toggle(o.value, locked)}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
                 >
                   <span
@@ -95,7 +107,9 @@ export function MultiSelect({
                     {checked ? <Check className="h-3 w-3" /> : null}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                  {options.length && checked ? (
+                  {checked && locked ? (
+                    <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  ) : options.length && checked ? (
                     <X className="h-3 w-3 shrink-0 text-muted-foreground" />
                   ) : null}
                 </button>

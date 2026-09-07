@@ -37,6 +37,7 @@ interface SettingsData {
   giftMinStageId: string | null;
   shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
+  exportEnabledUserIds: string[];
   passwordMinLength: number;
   passwordComplexity: boolean;
   genderOptions: string[];
@@ -174,6 +175,8 @@ export default function SettingsPage() {
       fd.append("customFieldsEnabled", data.customFieldsEnabled ? "true" : "false");
       fd.append("approvalEnabled", data.approvalEnabled ? "true" : "false");
       fd.append("unassignedVisibleFields", JSON.stringify(data.unassignedVisibleFields ?? ["platformLink", "creatorName"]));
+      fd.append("exportEnabledRoles", JSON.stringify(data.exportEnabledRoles ?? []));
+      fd.append("exportEnabledUserIds", JSON.stringify(data.exportEnabledUserIds ?? []));
       if (logoFile) {
         fd.append("logo", logoFile);
       } else if (removeLogo) {
@@ -840,7 +843,101 @@ export default function SettingsPage() {
           />
         </CardContent>
       </Card>
+
+      <ExportCard
+        roles={data.exportEnabledRoles}
+        userIds={data.exportEnabledUserIds}
+        onRolesChange={(v) => set("exportEnabledRoles", v)}
+        onUserIdsChange={(v) => set("exportEnabledUserIds", v)}
+      />
     </div>
+  );
+}
+
+function ExportCard({
+  roles,
+  userIds,
+  onRolesChange,
+  onUserIdsChange,
+}: {
+  roles: string[];
+  userIds: string[];
+  onRolesChange: (roles: string[]) => void;
+  onUserIdsChange: (userIds: string[]) => void;
+}) {
+  const [users, setUsers] = React.useState<
+    { id: string; displayName: string; roleName: string; teamName: string }[]
+  >([]);
+  const [rolesList, setRolesList] = React.useState<{ slug: string; name: string }[]>([]);
+
+  React.useEffect(() => {
+    fetch("/api/users")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setUsers((d.users ?? []).filter((u: { archivedAt: string | null }) => !u.archivedAt));
+        setRolesList(
+          (d.roles ?? []).filter((r: { slug: string; immutable?: boolean }) => !r.immutable && r.slug !== "admin"),
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  const toggleRole = (slug: string) =>
+    onRolesChange(
+      roles.includes(slug) ? roles.filter((s) => s !== slug) : [...roles, slug],
+    );
+  const toggleUser = (id: string) =>
+    onUserIdsChange(
+      userIds.includes(id) ? userIds.filter((s) => s !== id) : [...userIds, id],
+    );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">CSV export access</CardTitle>
+        <CardDescription>
+          Control who can export creators to CSV. Admins can always export. Enable whole roles
+          and/or specific team members below.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-5">
+        <div className="space-y-2">
+          <Label>Roles</Label>
+          {rolesList.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No exportable roles available.</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {rolesList.map((r) => (
+                <Toggle
+                  key={r.slug}
+                  label={r.name}
+                  checked={roles.includes(r.slug)}
+                  onChange={() => toggleRole(r.slug)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label>Specific team members</Label>
+          {users.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active users found.</p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {users.map((u) => (
+                <Toggle
+                  key={u.id}
+                  label={`${u.displayName} · ${u.roleName}${u.teamName ? ` (${u.teamName})` : ""}`}
+                  checked={userIds.includes(u.id)}
+                  onChange={() => toggleUser(u.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -700,6 +700,55 @@ export function canSeePendingCreator(
   return false;
 }
 
+/**
+ * Whether a user may export creator data. Admins always can; otherwise the
+ * export grant comes from the workspace "export.enabledRoles" (role-based) or
+ * the newer per-user "export.enabledUserIds" grant.
+ */
+export async function canExportCreators(user: SessionUser): Promise<boolean> {
+  if (user.roleSlug === "admin") return true;
+  const s = await import("./settings").then((m) => m.getSettings());
+  if (s.exportEnabledRoles.includes(user.roleSlug)) return true;
+  if (s.exportEnabledUserIds.includes(user.id)) return true;
+  return false;
+}
+
+/** Parse the shared creator-list query params (used by GET /api/creators and the export route). */
+export function parseCreatorListFilters(params: URLSearchParams): CreatorListFilters {
+  const custom: Record<string, string> = {};
+  for (const key of params.keys()) {
+    if (key.startsWith("cf_")) custom[key.slice(3)] = params.get(key) ?? "";
+  }
+  const shopifyParam = params.get("shopify");
+  const shopify = shopifyParam === "yes" || shopifyParam === "no" ? shopifyParam : undefined;
+  const sortParam = params.get("sort");
+  const sort = ["latest", "oldest", "name-asc", "name-desc", "created-desc", "created-asc"].includes(
+    sortParam ?? "",
+  )
+    ? (sortParam as NonNullable<CreatorListFilters["sort"]>)
+    : undefined;
+  return {
+    team: params.get("team") ?? "",
+    stage: params.get("stage") ?? "",
+    platform: params.get("platform") === "all-platform" ? "" : (params.get("platform") ?? ""),
+    niche: params.get("niche") ?? "",
+    owner: params.get("owner") ?? "",
+    q: params.get("q") ?? "",
+    pool: params.get("pool") ?? "",
+    overdue: params.get("overdue") === "1",
+    upcoming: params.get("upcoming") === "1",
+    pending: params.get("pending") === "1",
+    incomplete: params.get("incomplete") === "1",
+    gender: params.get("gender") ?? "",
+    shopify,
+    country: params.get("country") ?? "",
+    city: params.get("city") ?? "",
+    creatorType: params.get("creatorType") ?? "",
+    sort,
+    custom,
+  };
+}
+
 export async function listCreators(user: SessionUser, filters: CreatorListFilters = {}) {
   const { addDays, isBefore } = await import("date-fns");
   const now = new Date();

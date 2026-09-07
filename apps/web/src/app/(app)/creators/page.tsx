@@ -133,10 +133,12 @@ export default function CreatorsPage() {
     teamId: string;
     roleSlug: string;
     canCreate: boolean;
+    canExport: boolean;
   } | null>(null);
   const [refData, setRefData] = React.useState<ReferenceData | null>(null);
   const [debouncedQ, setDebouncedQ] = React.useState("");
   const [importOpen, setImportOpen] = React.useState(false);
+  const [exporting, setExporting] = React.useState(false);
 
   React.useEffect(() => {
     fetch("/api/me")
@@ -214,6 +216,50 @@ export default function CreatorsPage() {
     }
   }, [debouncedQ, filters, sort]);
 
+  const exportCsv = React.useCallback(async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (debouncedQ) params.set("q", debouncedQ);
+      if (filters.team && filters.team !== "all-team") params.set("team", filters.team);
+      if (filters.stage && filters.stage !== "all-stage") params.set("stage", filters.stage);
+      if (filters.platform) params.set("platform", filters.platform);
+      if (filters.pool && filters.pool !== "all-pool") params.set("pool", filters.pool);
+      if (filters.owner) params.set("owner", filters.owner);
+      if (sort && sort !== "latest") params.set("sort", sort);
+      if (filters.gender && filters.gender !== "all-gender") params.set("gender", filters.gender);
+      if (filters.shopify && filters.shopify !== "all-shopify") params.set("shopify", filters.shopify);
+      if (filters.niche && filters.niche !== "all-niche") params.set("niche", filters.niche);
+      if (filters.pending) params.set("pending", "1");
+      if (filters.incomplete) params.set("incomplete", "1");
+      if (filters.overdue) params.set("overdue", "1");
+      if (filters.upcoming) params.set("upcoming", "1");
+      const res = await fetch(`/api/creators/export?${params}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        alert(err?.error ?? "Export failed");
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      const filename = match?.[1] ?? `creators-${Date.now()}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }, [debouncedQ, filters, sort, exporting]);
+
   React.useEffect(() => {
     load();
     fetch("/api/creators/options")
@@ -233,7 +279,7 @@ export default function CreatorsPage() {
 
   const activeTrigger = (active: boolean) =>
     active ? "border-primary/60 bg-primary/5 font-medium text-primary" : "";
-  const smartCount = [filters.incomplete, filters.overdue, filters.upcoming, filters.pending, filters.myAssigned].filter(Boolean).length;
+  const smartCount = [filters.incomplete, filters.overdue, filters.upcoming, filters.pending].filter(Boolean).length;
 
   const SORT_OPTIONS: { value: string; label: string }[] = [
     { value: "latest", label: "Recently updated" },
@@ -276,37 +322,66 @@ export default function CreatorsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Tabs
-          value={view}
-          onValueChange={(v) => setView(v as View)}
-          className="mr-2"
-        >
-          <TabsList>
-            <TabsTrigger value="card">
-              <Grid2X2 className="mr-1 h-4 w-4" data-lucide="grid2x2" /> Cards
-            </TabsTrigger>
-            <TabsTrigger value="table">
-              <Table2 className="mr-1 h-4 w-4" data-lucide="table2" /> Table
-            </TabsTrigger>
-            <TabsTrigger value="kanban">
-              <KanbanSquare className="mr-1 h-4 w-4" data-lucide="kanban-square" /> Board
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {view === "card" ? (
-          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as "none" | "stage" | "owner" | "team")}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Group by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No grouping</SelectItem>
-              <SelectItem value="stage">Group by stage</SelectItem>
-              <SelectItem value="owner">Group by owner</SelectItem>
-              <SelectItem value="team">Group by team</SelectItem>
-            </SelectContent>
-          </Select>
+      {/* Scope: who the list shows (own creators in a dedicated area) */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex items-center gap-0.5 rounded-lg border border-border/70 bg-muted/40 p-0.5">
+          <button
+            type="button"
+            onClick={() => setFilters((f) => ({ ...f, myAssigned: false, owner: "" }))}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              !filters.myAssigned
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            All creators
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilters((f) => ({ ...f, myAssigned: true, owner: me?.id ?? "" }))}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              filters.myAssigned
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Assigned to me
+          </button>
+        </div>
+        {(filters.q || filters.team !== "all-team" || filters.stage !== "all-stage" || filters.platform !== "all-platform" || filters.pool !== "all-pool" || filters.owner || filters.gender !== "all-gender" || filters.shopify !== "all-shopify" || filters.niche !== "all-niche" || filters.pending || filters.incomplete || filters.overdue || filters.upcoming || filters.myAssigned || sort !== "latest") ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-muted-foreground"
+            onClick={() => {
+              setFilters({
+                q: "",
+                team: "all-team",
+                stage: "all-stage",
+                platform: "all-platform",
+                pool: "all-pool",
+                owner: "",
+                gender: "all-gender",
+                shopify: "all-shopify",
+                niche: "all-niche",
+                pending: false,
+                incomplete: false,
+                overdue: false,
+                upcoming: false,
+                myAssigned: false,
+              });
+              setSort("latest");
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Reset all filters
+          </Button>
         ) : null}
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
         <Select value={filters.team} onValueChange={(v) => setFilters((f) => ({ ...f, team: v }))}>
           <SelectTrigger className={cn("w-40", activeTrigger(filters.team !== "all-team"))}>
             <SelectValue placeholder="All teams" />
@@ -405,19 +480,6 @@ export default function CreatorsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={sort} onValueChange={setSort}>
-          <SelectTrigger className="w-44">
-            <ArrowUpDown className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-            <SelectValue placeholder="Sort" />
-          </SelectTrigger>
-          <SelectContent>
-            {SORT_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Popover.Root>
           <Popover.Trigger asChild>
             <Button
@@ -473,50 +535,52 @@ export default function CreatorsPage() {
         </Popover.Root>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button
-          variant={filters.myAssigned ? "default" : "outline"}
-          size="sm"
-          className="gap-1.5"
-          onClick={() =>
-            setFilters((f) => ({
-              ...f,
-              myAssigned: !f.myAssigned,
-              owner: !f.myAssigned && me?.id ? me.id : "",
-            }))
-          }
-        >
-          {filters.myAssigned ? <Check className="h-3.5 w-3.5" /> : null}
-          My assigned
-        </Button>
-        {(filters.q || filters.team !== "all-team" || filters.stage !== "all-stage" || filters.platform !== "all-platform" || filters.pool !== "all-pool" || filters.owner || filters.gender !== "all-gender" || filters.shopify !== "all-shopify" || filters.niche !== "all-niche" || filters.pending || filters.incomplete || filters.overdue || filters.upcoming || filters.myAssigned || sort !== "latest") ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-muted-foreground"
-            onClick={() => {
-              setFilters({
-                q: "",
-                team: "all-team",
-                stage: "all-stage",
-                platform: "all-platform",
-                pool: "all-pool",
-                owner: "",
-                gender: "all-gender",
-                shopify: "all-shopify",
-                niche: "all-niche",
-                pending: false,
-                incomplete: false,
-                overdue: false,
-                upcoming: false,
-                myAssigned: false,
-              });
-              setSort("latest");
-            }}
+      {/* View toolbar: which view + how it is arranged */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs
+            value={view}
+            onValueChange={(v) => setView(v as View)}
           >
-            <RotateCcw className="h-3.5 w-3.5" /> Reset all filters
-          </Button>
-        ) : null}
+            <TabsList>
+              <TabsTrigger value="card">
+                <Grid2X2 className="mr-1 h-4 w-4" data-lucide="grid2x2" /> Cards
+              </TabsTrigger>
+              <TabsTrigger value="table">
+                <Table2 className="mr-1 h-4 w-4" data-lucide="table2" /> Table
+              </TabsTrigger>
+              <TabsTrigger value="kanban">
+                <KanbanSquare className="mr-1 h-4 w-4" data-lucide="kanban-square" /> Board
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {view === "card" ? (
+            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as "none" | "stage" | "owner" | "team")}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Group by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No grouping</SelectItem>
+                <SelectItem value="stage">Group by stage</SelectItem>
+                <SelectItem value="owner">Group by owner</SelectItem>
+                <SelectItem value="team">Group by team</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
+        <Select value={sort} onValueChange={setSort}>
+          <SelectTrigger className="w-44">
+            <ArrowUpDown className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+            <SelectValue placeholder="Sort" />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {loading ? (
@@ -533,6 +597,8 @@ export default function CreatorsPage() {
           onStageChanged={(id, stage) =>
             setCreators((prev) => prev.map((c) => (c.id === id ? { ...c, stage } : c)))
           }
+          exportable={!!me?.canExport}
+          onExport={exportCsv}
         />
       ) : (
         <KanbanBoard creators={creators} stages={stages} />

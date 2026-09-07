@@ -3,7 +3,7 @@
 import Link from "next/link";
 import * as React from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { ArrowDown01, ArrowUp01, ArrowUpDown, Check, Columns3 } from "lucide-react";
+import { ArrowDown01, ArrowUp01, ArrowUpDown, Check, Columns3, Download } from "lucide-react";
 import {
   useLegacyTable as useTable,
   getCoreRowModel,
@@ -287,9 +287,13 @@ const STORAGE_KEY = "trackcrm-table-columns";
 export function CreatorsTable({
   creators,
   onStageChanged,
+  exportable,
+  onExport,
 }: {
   creators: CreatorListItem[];
   onStageChanged?: (id: string, stage: { id: string; name: string }) => void;
+  exportable?: boolean;
+  onExport?: () => void;
 }) {
   const [hidden, setHidden] = React.useState<Set<string>>(() => {
     if (typeof window === "undefined") {
@@ -354,7 +358,13 @@ export function CreatorsTable({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="rounded-xl border bg-card">
-        <div className="flex items-center justify-end border-b border-border/60 px-3 py-2">
+        <div className="flex items-center justify-end gap-1 border-b border-border/60 px-3 py-2">
+          {exportable ? (
+            <Button variant="ghost" size="sm" className="gap-1.5 text-xs font-medium" onClick={onExport}>
+              <Download className="h-3.5 w-3.5" />
+              Export
+            </Button>
+          ) : null}
           <Popover.Root>
             <Popover.Trigger asChild>
               <Button variant="ghost" size="sm" className="gap-1.5 text-xs font-medium">

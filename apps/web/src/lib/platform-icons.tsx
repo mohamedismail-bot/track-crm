@@ -121,25 +121,13 @@ export function PlatformLogoBadge({
   handle?: string | null;
   size?: number;
 }) {
-  const COLORS: Record<string, string> = {
-    INSTAGRAM: "#E4405F",
-    TIKTOK: "#000000",
-    YOUTUBE: "#FF0000",
-    X: "#000000",
-    SNAPCHAT: "#FFFC00",
-    FACEBOOK: "#1877F2",
-    LINKEDIN: "#0A66C2",
-    TWITCH: "#9146FF",
-    OTHER: "#6b7280",
-  };
-  const color = COLORS[platform] ?? "#6b7280";
   const content = (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white"
-      style={{ backgroundColor: color }}
+      className="inline-flex items-center gap-1 text-muted-foreground"
+      title={handle ? `@${handle}` : undefined}
     >
-      <PlatformLogoIcon platform={platform} size={size} />
-      {handle ? <span className="max-w-[80px] truncate">{handle}</span> : null}
+      <PlatformLogoIcon platform={platform} size={size} className="shrink-0" />
+      {handle ? <span className="max-w-[72px] truncate text-[11px] font-medium">{handle}</span> : null}
     </span>
   );
 
@@ -150,8 +138,9 @@ export function PlatformLogoBadge({
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center transition-opacity hover:opacity-80"
+      className="inline-flex items-center rounded transition-colors hover:text-foreground"
       onClick={(e) => e.stopPropagation()}
+      title={handle ? `@${handle} on ${platform}` : undefined}
     >
       {content}
     </a>
