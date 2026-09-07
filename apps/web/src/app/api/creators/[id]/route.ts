@@ -99,7 +99,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
             : "none",
     poolStatus,
     isOwnedByMe: owns,
-    canMove: (owns || isManager) && sameTeam,
+    canMove: ((owns || isManager || session.roleSlug === "admin") && sameTeam) || (session.roleSlug === "admin" && owns),
     canLog: sameTeam,
     canReviewApproval:
       (session.roleSlug === "admin" ||
@@ -146,6 +146,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const body = await req.json();
 
+    // Protected identity fields — only the Admin may change these.
+    if (session.roleSlug !== "admin") {
+      if (body.profiles !== undefined) {
+        return jsonError("Only the Admin can change the platform profiles of a creator.", 403);
+      }
+      for (const field of ["name", "email"] as const) {
+        if (
+          body[field] !== undefined &&
+          (body[field] as string | null) !== creatorBefore[field] &&
+          (body[field] as string | undefined)?.trim().toLowerCase() !==
+            (creatorBefore[field] ?? "")?.toString().toLowerCase()
+        ) {
+          return jsonError(`Only the Admin can change the ${field} of a creator.`, 403);
+        }
+      }
+    }
+
     // Merge the submitted subset onto the current values so mandatory-field
     // and cross-field validation always runs against the final state.
     const merged: Record<string, unknown> = {
@@ -190,9 +207,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
     if (phone) {
-      const dupPhone = await prisma.creator.findUnique({ where: { phone } });
-      if (dupPhone && dupPhone.id !== id) {
-        return jsonError(`A creator with the phone ${phone} already exists.`, 409);
+      const { findDuplicatePhone } = await import("@/lib/creators");
+      const dupPhone = await findDuplicatePhone(phone, id);
+      if (dupPhone) {
+        return jsonError(`A creator with this phone number already exists (${dupPhone.name}).`, 409);
       }
     }
 

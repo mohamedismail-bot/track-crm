@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Users, CalendarClock, Flame } from "lucide-react";
+import { Users, CalendarClock, Flame, AlertTriangle } from "lucide-react";
 import type { Platform } from "@prisma/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import {
   PlatformBadge,
   initials,
@@ -47,6 +48,18 @@ export interface CreatorListItem {
   createdAt: string;
 }
 
+const PLATFORM_COLORS: Record<string, string> = {
+  INSTAGRAM: "#E4405F",
+  TIKTOK: "#010101",
+  YOUTUBE: "#FF0000",
+  X: "#14171A",
+  SNAPCHAT: "#FFFC00",
+  FACEBOOK: "#1877F2",
+  LINKEDIN: "#0A66C2",
+  TWITCH: "#9146FF",
+  OTHER: "#6b7280",
+};
+
 export function relationshipLabel(r: CreatorListItem["relationship"]): string {
   switch (r) {
     case "owned":
@@ -77,7 +90,36 @@ export function approvalBadge(c: CreatorListItem) {
 export function incompleteBadge(c: CreatorListItem) {
   if (c.approvalStatus) return null;
   if (!c.incompleteData) return null;
-  return <Badge variant="info">Incomplete data</Badge>;
+  return (
+    <Badge variant="destructive" className="gap-1">
+      <AlertTriangle className="h-3 w-3" /> Incomplete data
+    </Badge>
+  );
+}
+
+function PlatformIconLink({ platform, url, handle }: { platform: Platform; url: string; handle: string }) {
+  const color = PLATFORM_COLORS[platform] ?? "#6b7280";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          title={`Open ${platform.toLowerCase()} profile`}
+          aria-label={`${platform} profile of @${handle}`}
+          className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold uppercase tracking-wide text-white ring-1 ring-black/10 transition-transform hover:scale-110"
+          style={{ backgroundColor: color }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {platform.slice(0, 1)}
+        </a>
+      </TooltipTrigger>
+      <TooltipContent>
+        {platform} · @{handle}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function CreatorCard({ creator }: { creator: CreatorListItem }) {
@@ -87,12 +129,10 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
       : false;
 
   return (
-    <Link
-      href={`/creators/${creator.id}`}
-      className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
-    >
+    <TooltipProvider delayDuration={200}>
+      <div className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-3">
+        <Link href={`/creators/${creator.id}`} className="flex min-w-0 items-center gap-3">
           <Avatar className="h-10 w-10 ring-1 ring-border">
             <AvatarFallback>{initials(creator.name)}</AvatarFallback>
           </Avatar>
@@ -100,15 +140,23 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
             <p className="truncate text-sm font-semibold leading-tight group-hover:underline">
               {creator.name}
             </p>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1">
-              {creator.profiles.length ? (
-                creator.profiles.map((p) => <PlatformBadge key={`${p.platform}-${p.handle}`} platform={p.platform} />)
-              ) : creator.platform ? (
-                <PlatformBadge platform={creator.platform} />
-              ) : null}
-              <span className="truncate text-xs text-muted-foreground">@{creator.handle ?? "—"}</span>
-            </div>
+            {!creator.profiles.length ? (
+              <span className="text-xs text-muted-foreground">@{creator.handle ?? "—"}</span>
+            ) : null}
           </div>
+        </Link>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+          {creator.profiles.length ? (
+            creator.profiles.map((p) =>
+              p.url ? (
+                <PlatformIconLink key={`${p.platform}-${p.handle}`} platform={p.platform} url={p.url} handle={p.handle} />
+              ) : (
+                <PlatformBadge key={`${p.platform}-${p.handle}`} platform={p.platform} />
+              ),
+            )
+          ) : creator.platform ? (
+            <PlatformBadge platform={creator.platform} />
+          ) : null}
         </div>
         {creator.stage ? (
           <Badge variant="outline" className="shrink-0">
@@ -162,13 +210,21 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
           <div className="flex items-center gap-1.5">
             <div className="flex -space-x-2">
               {creator.owners.slice(0, 3).map((o) => (
-                <div
-                  key={o.id}
-                  title={`${o.name} · ${o.teamName}`}
-                  className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-medium ring-2 ring-card"
-                >
-                  {initials(o.name).slice(0, 2)}
-                </div>
+                <Tooltip key={o.id}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href={`/creators?owner=${o.id}`}
+                      title={`${o.name} · ${o.teamName}`}
+                      aria-label={`Filter by owner ${o.name}`}
+                      className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[10px] font-medium text-secondary-foreground ring-2 ring-card transition-colors hover:bg-primary hover:text-primary-foreground"
+                    >
+                      {initials(o.name).slice(0, 2)}
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {o.name} · {o.teamName}
+                  </TooltipContent>
+                </Tooltip>
               ))}
             </div>
             {creator.approvalStatus ? (
@@ -188,6 +244,7 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
           {creator.lastActivityAt ? timeAgo(creator.lastActivityAt) : "No activity"}
         </span>
       </div>
-    </Link>
+      </div>
+    </TooltipProvider>
   );
 }

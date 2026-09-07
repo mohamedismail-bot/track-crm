@@ -330,9 +330,10 @@ export default function CreatorProfilePage() {
             countryValue: creator.countryRef?.name ?? null,
             cityValue: creator.cityRef?.name ?? null,
             creatorTypeValue: creator.creatorTypeRef?.name ?? null,
+            canEditProtected: me?.roleSlug === "admin",
           }
         : null,
-    [creator],
+    [creator, me],
   );
 
   const isRequester = creator?.createdBy?.id === me?.id;
@@ -654,38 +655,6 @@ export default function CreatorProfilePage() {
         </CardContent>
       </Card>
 
-      {shopifyModuleVisible ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Store className="h-4 w-4" /> Shopify
-            </CardTitle>
-            <CardDescription>
-              Track this creator&apos;s Shopify store registration. Available once the outreach reaches the
-              minimum stage.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-sm">
-                {creator.shopifyRegistered ? (
-                  <span className="inline-flex items-center gap-1.5 text-emerald-600">
-                    <CheckCircle2 className="h-4 w-4" /> Registered on Shopify
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Not registered on Shopify</span>
-                )}
-              </span>
-              {canEditProfile ? (
-                <Button size="sm" variant={creator.shopifyRegistered ? "outline" : "default"} onClick={toggleShopify} disabled={shopifyBusy}>
-                  {shopifyBusy ? "Saving…" : creator.shopifyRegistered ? "Mark not registered" : "Mark registered"}
-                </Button>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Dialog open={rejectOpen} onOpenChange={(v) => { setRejectOpen(v); if (!v) setRejectReason(""); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -997,6 +966,36 @@ export default function CreatorProfilePage() {
         </div>
 
         <div className="space-y-4">
+          {shopifyModuleVisible ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Store className="h-4 w-4" /> Shopify
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-sm">
+                    {creator.shopifyRegistered ? (
+                      <span className="inline-flex items-center gap-1.5 text-emerald-600">
+                        <CheckCircle2 className="h-4 w-4" /> Registered on Shopify
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Not registered on Shopify</span>
+                    )}
+                  </span>
+                  {canEditProfile ? (
+                    <Button size="sm" variant={creator.shopifyRegistered ? "outline" : "default"} onClick={toggleShopify} disabled={shopifyBusy}>
+                      {shopifyBusy ? "Saving…" : creator.shopifyRegistered ? "Mark not registered" : "Mark registered"}
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Appears once outreach reaches the minimum stage.
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
           {!isOtherTeam ? (
             <Card>
               <CardHeader>

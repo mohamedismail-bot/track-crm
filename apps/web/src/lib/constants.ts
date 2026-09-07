@@ -489,6 +489,23 @@ export function urlPlatformMismatch(input: string, selected: Platform): Platform
   return detected;
 }
 
+/**
+ * Strict platform-profile entry check: interactive entries must start with
+ * `@` or be a full link. Returns a user-facing error message, or null when OK.
+ */
+export function strictProfileEntryError(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return "Every platform profile needs a handle.";
+  if (looksLikeUrl(trimmed)) return null;
+  if (!trimmed.startsWith("@")) {
+    return "Start with “@” (e.g. @handle) or paste a full link (e.g. https://instagram.com/handle).";
+  }
+  const cleaned = trimmed.replace(/^@+/, "").trim();
+  if (!cleaned) return "Enter a handle after “@”.";
+  if (/[\s/]/.test(cleaned)) return "A handle cannot contain spaces or slashes.";
+  return null;
+}
+
 export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -507,4 +524,9 @@ export function buildE164(dialCode: string, localDigits: string): string {
 
 export function isValidE164(phone: string): boolean {
   return /^\+\d{8,15}$/.test(phone);
+}
+
+/** Local digits of an E.164 phone — the number after the country dial code. */
+export function localDigitsOfE164(phone: string): string {
+  return phone.replace(/^\+\d+/, "").replace(/[^\d]/g, "");
 }

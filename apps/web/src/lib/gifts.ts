@@ -156,7 +156,7 @@ export async function requestGift(
     // A second gift in the same month needs manager approval: it is NOT a dead
     // end — proceed in exception mode so the gift gets created as REQUESTED.
     if (check.blocked || !check.needsException) {
-      return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked };
+      return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked, missingFields: check.missingFields };
     }
   }
 

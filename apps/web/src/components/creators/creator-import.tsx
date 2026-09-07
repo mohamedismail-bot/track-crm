@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Upload, CheckCircle2, MinusCircle, XCircle } from "lucide-react";
+import { Upload, CheckCircle2, MinusCircle, XCircle, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,12 +91,21 @@ export function ImportCreatorsDialog({
             <Label htmlFor="import-file" className="flex items-center gap-2">
               <Upload className="h-4 w-4" /> Excel file (.xlsx)
             </Label>
-            <Input
-              id="import-file"
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                id="import-file"
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+              <a
+                href="/api/creators/import/template"
+                download="creators-import-template.xlsx"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent"
+              >
+                <FileDown className="h-4 w-4" /> Template
+              </a>
+            </div>
             <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
               <p className="font-medium text-foreground">Recognized columns</p>
               <p className="mt-1">

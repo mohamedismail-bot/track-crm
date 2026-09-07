@@ -29,8 +29,9 @@ export async function GET(req: NextRequest) {
   }
   if (platform === "PHONE") {
     const normalized = handle.startsWith("+") ? handle : `+${handle.replace(/^\+/, "")}`;
-    const existing = await prisma.creator.findUnique({ where: { phone: normalized } });
-    if (!existing || existing.deletedAt) return NextResponse.json({ exists: false });
+    const { findDuplicatePhone } = await import("@/lib/creators");
+    const existing = await findDuplicatePhone(normalized, exclude || undefined);
+    if (!existing) return NextResponse.json({ exists: false });
     return NextResponse.json({
       exists: true,
       creatorId: existing.id,

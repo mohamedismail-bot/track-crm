@@ -17,10 +17,17 @@ export async function GET(req: NextRequest) {
   const shopifyParam = params.get("shopify");
   const shopify = shopifyParam === "yes" || shopifyParam === "no" ? shopifyParam : undefined;
 
+  const sortParam = params.get("sort");
+  const sort = ["latest", "oldest", "name-asc", "name-desc", "created-desc", "created-asc"].includes(
+    sortParam ?? "",
+  )
+    ? (sortParam as NonNullable<import("@/lib/creators").CreatorListFilters["sort"]>)
+    : undefined;
+
   const items = await listCreators(session, {
     team: params.get("team") ?? "",
     stage: params.get("stage") ?? "",
-    platform: params.get("platform") ?? "",
+    platform: params.get("platform") === "all-platform" ? "" : (params.get("platform") ?? ""),
     niche: params.get("niche") ?? "",
     owner: params.get("owner") ?? "",
     q: params.get("q") ?? "",
@@ -34,6 +41,7 @@ export async function GET(req: NextRequest) {
     country: params.get("country") ?? "",
     city: params.get("city") ?? "",
     creatorType: params.get("creatorType") ?? "",
+    sort,
     custom,
   });
 

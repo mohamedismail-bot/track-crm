@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Star, Trash2, Loader2 } from "lucide-react";
+import { Star, Trash2, Loader2, ShieldAlert } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,8 +21,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { MultiSelect, type MultiSelectOption } from "@/components/ui/multi-select";
 import { toast } from "@/components/ui/toast";
-import { PLATFORM_LABELS, CREATOR_FIELD_TYPE_LABELS, buildE164, handleFromInput, looksLikeUrl, urlPlatformMismatch } from "@/lib/constants";
+import {
+  PLATFORM_LABELS,
+  CREATOR_FIELD_TYPE_LABELS,
+  buildE164,
+  handleFromInput,
+  looksLikeUrl,
+  urlPlatformMismatch,
+  strictProfileEntryError,
+} from "@/lib/constants";
 
 export type PlatformKey =
   | "INSTAGRAM"
@@ -73,6 +82,12 @@ interface ReferencePayload {
   customFieldsEnabled: boolean;
   approvalEnabled: boolean;
 }
+interface OwnerOption {
+  id: string;
+  displayName: string;
+  teamId: string | null;
+  teamName: string | null;
+}
 
 interface ProfileRow {
   platform: PlatformKey;
@@ -100,6 +115,7 @@ export interface EditableCreatorInput {
   cityValue: string | null;
   creatorTypeValue: string | null;
   canEdit?: boolean;
+  canEditProtected?: boolean;
 }
 
 interface CreatorFormProps {
@@ -133,7 +149,9 @@ export function CreatorFormDialog({
   const [cityId, setCityId] = React.useState("");
   const [creatorTypeId, setCreatorTypeId] = React.useState("");
   const [niche, setNiche] = React.useState<string[]>([]);
-  const [customNiche, setCustomNiche] = React.useState("");
+  const [ownerIds, setOwnerIds] = React.useState<string[]>([]);
+  const [ownerOptions, setOwnerOptions] = React.useState<OwnerOption[]>([]);
+  const [me, setMe] = React.useState<{ id: string; teamId: string | null } | null>(null);
   const [followers, setFollowers] = React.useState("");
   const [engagementRate, setEngagementRate] = React.useState("");
   const [notes, setNotes] = React.useState("");
@@ -154,6 +172,47 @@ export function CreatorFormDialog({
   React.useEffect(() => {
     if (open) fetchRef();
   }, [open, fetchRef]);
+
+  // Create mode: default the dial code to Egypt (+20) once reference data is
+  // available, and load the assign-to owner list (same team).
+  React.useEffect(() => {
+    if (!open || mode !== "create") return;
+    let cancelled = false;
+    (async () => {
+      const me = await fetch("/api/me").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const opts = await fetch("/api/creators/options")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      if (cancelled) return;
+      const owners: OwnerOption[] = (opts?.owners ?? []).map(
+        (o: { id: string; displayName: string; teamId: string }) => ({
+          id: o.id,
+          displayName: o.displayName,
+          teamId: o.teamId ?? null,
+          teamName: null,
+        }),
+      );
+      setOwnerOptions(owners);
+      if (me?.id) {
+        setMe((prev) => prev ?? { id: me.id, teamId: me.teamId ?? null });
+        setOwnerIds((prev) => (prev.length ? prev : [me.id]));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode]);
+
+  // Egypt +20 default dial code for an empty phone country selection.
+  React.useEffect(() => {
+    const countries = ref?.countries ?? [];
+    if (mode !== "create" || phoneCountryId || !countries.length) return;
+    const egypt =
+      countries.find((c) => c.name.toLowerCase() === "egypt") ??
+      countries.find((c) => c.dialCode === "+20") ??
+      countries[0];
+    if (egypt) setPhoneCountryId(egypt.id);
+  }, [mode, phoneCountryId, ref]);
 
   React.useEffect(() => {
     if (mode === "edit" && initial && open) {
@@ -194,11 +253,20 @@ export function CreatorFormDialog({
   const citiesOf = (id: string) => countryOf(id)?.cities ?? [];
   const dialOf = (id: string) => countryOf(id)?.dialCode ?? "";
   const phonePreview = phoneDigits.replace(/\D/g, "") ? buildE164(dialOf(phoneCountryId), phoneDigits) : "";
+  const phoneDigitsClean = phoneDigits.replace(/\D/g, "");
+  const dialCountry = countryOf(phoneCountryId);
+  const phoneDigitsMismatch =
+    !!phoneDigitsClean && dialCountry?.phoneDigits != null && phoneDigitsClean.length !== dialCountry.phoneDigits;
 
   const requiredFields = (ref?.fields ?? []).filter((f) => f.required);
   const customFields = (ref?.fields ?? []).filter((f) => f.id != null && !f.isSystem);
   const customFieldsVisible = (ref?.customFieldsEnabled ?? true) && customFields.length > 0;
   const nicheOptions = ref?.nicheOptions ?? [];
+  const lockedProtected = mode === "edit" && initial?.canEditProtected === false;
+  const ownerAssignable: MultiSelectOption[] = (me?.teamId
+    ? ownerOptions.filter((o) => o.teamId === me.teamId)
+    : ownerOptions
+  ).map((o) => ({ value: o.id, label: o.displayName }));
 
   React.useEffect(() => {
     if (!countryId) return;
@@ -300,10 +368,17 @@ export function CreatorFormDialog({
       }
     }
     if (mode === "create" && !gender) return "Gender is required.";
-    if (phoneDigits.replace(/\D/g, "") && !phoneCountryId) return "Pick a country dial code for the phone.";
+    const digits = phoneDigits.replace(/\D/g, "");
+    if (digits && !phoneCountryId) return "Pick a country dial code for the phone.";
+    const dialCountry = countryOf(phoneCountryId);
+    if (digits && dialCountry?.phoneDigits != null && digits.length !== dialCountry.phoneDigits) {
+      return `${dialCountry.name} phone numbers must have exactly ${dialCountry.phoneDigits} digits (after the dial code).`;
+    }
     for (const [i, p] of profiles.entries()) {
       const trimmed = p.input.trim();
       if (!trimmed) continue;
+      const formatError = strictProfileEntryError(trimmed);
+      if (formatError) return formatError;
       const handle = handleFromInput(trimmed);
       if (!handle) return looksLikeUrl(trimmed) ? "Could not read a handle from that link." : "A handle cannot contain spaces or slashes.";
       const muted = mutedRows[i];
@@ -342,9 +417,14 @@ export function CreatorFormDialog({
       engagementRate: engagementRate ? Number(engagementRate) : undefined,
       notes: notes.trim() || undefined,
       customFields: custom,
-      profiles: profiles
-        .filter((p) => p.input.trim())
-        .map((p) => ({ platform: p.platform, input: p.input.trim(), isPrimary: p.isPrimary })),
+      ...(mode === "create" && ownerIds.length ? { ownerIds } : {}),
+      ...(mode === "edit" && initial && !initial.canEditProtected
+        ? {}
+        : {
+            profiles: profiles
+              .filter((p) => p.input.trim())
+              .map((p) => ({ platform: p.platform, input: p.input.trim(), isPrimary: p.isPrimary })),
+          }),
     };
 
     setSubmitting(true);
@@ -403,7 +483,7 @@ export function CreatorFormDialog({
               <Label htmlFor="cf-name" className="inline-flex items-center gap-1">
                 Name <span className="text-destructive">*</span>
               </Label>
-              <Input id="cf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Creator name" />
+              <Input id="cf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Creator name" disabled={lockedProtected} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cf-gender" className="inline-flex items-center gap-1">
@@ -430,11 +510,17 @@ export function CreatorFormDialog({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
+                disabled={lockedProtected}
               />
               {email.trim() && !/.+@.+\..+/.test(email.trim()) ? (
                 <p className="text-xs text-destructive">Enter a valid email address.</p>
               ) : null}
               {emailDup ? <p className="text-xs text-destructive">A creator with this email already exists.</p> : null}
+              {lockedProtected ? (
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <ShieldAlert className="h-3 w-3" /> Name, email and platform profiles can only be changed by the Admin.
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="cf-phone">Phone {requiredFields.some((f) => f.key === "phone") ? <span className="text-destructive">*</span> : null}</Label>
@@ -457,15 +543,23 @@ export function CreatorFormDialog({
                   value={phoneDigits}
                   onChange={(e) => setPhoneDigits(e.target.value.replace(/[^\d]/g, ""))}
                   placeholder="1001234567 (digits only)"
+                  aria-invalid={phoneDigitsMismatch}
+                  className={phoneDigitsMismatch ? "border-destructive" : ""}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                {countryOf(phoneCountryId)?.phoneDigits != null
-                  ? `${countryOf(phoneCountryId)!.name} phone numbers have exactly ${countryOf(phoneCountryId)!.phoneDigits} digits after the dial code.`
-                  : phonePreview
-                    ? `Stored as ${phonePreview}`
-                    : "Digits only — no spaces or dashes."}
-              </p>
+              {phoneDigitsMismatch ? (
+                <p className="text-xs text-destructive">
+                  {dialCountry?.name} phone numbers have exactly {dialCountry?.phoneDigits} digits (after the dial code).
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {dialCountry?.phoneDigits != null
+                    ? `${dialCountry!.name} phone numbers have exactly ${dialCountry!.phoneDigits} digits after the dial code.`
+                    : phonePreview
+                      ? `Stored as ${phonePreview}`
+                      : "Digits only — no spaces or dashes."}
+                </p>
+              )}
               {phoneDup ? <p className="text-xs text-destructive">A creator with this phone already exists.</p> : null}
             </div>
           </div>
@@ -540,70 +634,23 @@ export function CreatorFormDialog({
                 Niche{" "}
                 {requiredFields.some((f) => f.key === "niche") ? <span className="text-destructive">*</span> : null}
               </Label>
-              <div className="flex flex-wrap gap-1.5">
-                {nicheOptions.map((o) => {
-                  const active = niche.includes(o);
-                  return (
-                    <Button
-                      key={o}
-                      type="button"
-                      size="sm"
-                      variant={active ? "default" : "outline"}
-                      onClick={() =>
-                        setNiche((prev) => (prev.includes(o) ? prev.filter((n) => n !== o) : [...prev, o]))
-                      }
-                    >
-                      {o}
-                    </Button>
-                  );
-                })}
-                {niche.filter((n) => !nicheOptions.includes(n)).map((o) => (
-                  <Button
-                    key={o}
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setNiche((prev) => prev.filter((n) => n !== o))}
-                  >
-                    {o} ×
-                  </Button>
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="cf-niche"
-                  value={customNiche}
-                  onChange={(e) => setCustomNiche(e.target.value)}
-                  placeholder={nicheOptions.length ? "Add a custom niche…" : "Type a niche…"}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      const v = customNiche.trim();
-                      if (v && !niche.includes(v)) setNiche((prev) => [...prev, v]);
-                      setCustomNiche("");
-                    }
-                  }}
-                  className="max-w-xs"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const v = customNiche.trim();
-                    if (v && !niche.includes(v)) setNiche((prev) => [...prev, v]);
-                    setCustomNiche("");
-                  }}
-                >
-                  Add
-                </Button>
-              </div>
-              {niche.length ? <p className="text-xs text-muted-foreground">{niche.join(", ")}</p> : null}
+              <MultiSelect
+                options={nicheOptions.map((o) => ({ value: o, label: o }))}
+                value={niche}
+                onChange={setNiche}
+                placeholder={nicheOptions.length ? "Select niches…" : "No niche options yet"}
+                triggerClassName={nicheOptions.length ? "" : "text-muted-foreground"}
+              />
+              {niche.length ? (
+                <p className="text-xs text-muted-foreground">{niche.join(", ")}</p>
+              ) : null}
               {!nicheOptions.length ? (
                 <p className="text-xs text-muted-foreground">
                   Add niche options in Workspace settings → Creator fields.
                 </p>
-              ) : null}
+              ) : (
+                <p className="text-xs text-muted-foreground">Pick one or more, or clear to leave empty.</p>
+              )}
             </div>
             <div className="space-y-1.5 sm:col-span-3">
               <Label htmlFor="cf-notes">Notes</Label>
@@ -618,6 +665,26 @@ export function CreatorFormDialog({
               {customFields.map((f) => (
                 <CustomFieldInput key={f.id} field={f} value={custom[f.id!] ?? ""} onChange={(v) => handleCustomChange(f.id!, v)} />
               ))}
+            </div>
+          ) : null}
+
+          {/* Assignment */}
+          {mode === "create" ? (
+            <div className="space-y-1.5">
+              <Label className="inline-flex items-center gap-1">
+                Assign to {requiredFields.some((f) => f.key === "owner") ? <span className="text-destructive">*</span> : null}
+              </Label>
+              <MultiSelect
+                options={ownerAssignable}
+                value={ownerIds}
+                onChange={(next) => {
+                  setOwnerIds(next);
+                }}
+                placeholder="Select team members…"
+              />
+              <p className="text-xs text-muted-foreground">
+                Who should work this creator. Multiple owners are allowed when the workspace enables it.
+              </p>
             </div>
           ) : null}
 
@@ -636,6 +703,7 @@ export function CreatorFormDialog({
                     size="sm"
                     variant={active ? "default" : "outline"}
                     className="text-xs"
+                    disabled={lockedProtected}
                     onClick={() => {
                       if (active) {
                         setProfiles((prev) => prev.filter((r) => r.platform !== p));
@@ -656,6 +724,9 @@ export function CreatorFormDialog({
             {profiles.map((row, i) => {
               const check = dupChecks[i];
               const muted = mutedRows[i];
+              const trimmed = row.input.trim();
+              const strictErr = trimmed ? strictProfileEntryError(trimmed) : null;
+              const showError = !muted && strictErr && !check;
               return (
                 <div key={`${row.platform}-${i}`} className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -665,8 +736,10 @@ export function CreatorFormDialog({
                     <Input
                       value={row.input}
                       onChange={(e) => setProfile(i, { input: e.target.value })}
-                      placeholder={row.platform === "OTHER" ? "e.g. tiktok.com/myname or @myname" : `e.g. @handle or a ${PLATFORM_LABELS[row.platform].toLowerCase()} link`}
-                      className={muted ? "border-destructive" : ""}
+                      placeholder={row.platform === "OTHER" ? "e.g. https://tiktok.com/@myname or @myname" : `e.g. @handle or a ${PLATFORM_LABELS[row.platform].toLowerCase()} link`}
+                      disabled={lockedProtected}
+                      aria-invalid={!!muted || !!showError}
+                      className={muted || showError ? "border-destructive" : ""}
                     />
                     <Button
                       type="button"
@@ -674,6 +747,7 @@ export function CreatorFormDialog({
                       variant="ghost"
                       title={row.isPrimary ? "Primary profile" : "Make primary"}
                       className={row.isPrimary ? "text-amber-500" : "text-muted-foreground"}
+                      disabled={lockedProtected}
                       onClick={() => markPrimary(i)}
                     >
                       <Star className="h-4 w-4" fill={row.isPrimary ? "currentColor" : "none"} />
@@ -683,6 +757,7 @@ export function CreatorFormDialog({
                       size="icon"
                       variant="ghost"
                       className="shrink-0 text-muted-foreground"
+                      disabled={lockedProtected}
                       onClick={() => setProfiles((prev) => prev.filter((_, j) => j !== i))}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -692,6 +767,8 @@ export function CreatorFormDialog({
                     <p className="text-xs text-destructive">
                       That looks like a {muted.detected} link — different from the selected platform.
                     </p>
+                  ) : strictErr ? (
+                    <p className="text-xs text-destructive">{strictErr}</p>
                   ) : check?.state === "checking" ? (
                     <p className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                       <Loader2 className="h-3 w-3 animate-spin" /> Checking…

@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload } from "lucide-react";
+import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown } from "lucide-react";
+import * as Popover from "@radix-ui/react-popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { CreatorCard, type CreatorListItem } from "@/components/creators/creator-card";
 import { CreatorsTable } from "@/components/creators/creators-table";
 import { KanbanBoard, type KanbanStage } from "@/components/creators/kanban-board";
@@ -51,17 +53,18 @@ export default function CreatorsPage() {
     q: "",
     team: "all-team",
     stage: "all-stage",
-    platform: "",
+    platform: "all-platform",
     pool: "all-pool",
     owner: "",
-    gender: "",
-    shopify: "",
-    niche: "",
+    gender: "all-gender",
+    shopify: "all-shopify",
+    niche: "all-niche",
     pending: params.get("pending") === "1",
     incomplete: params.get("incomplete") === "1",
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
   });
+  const [sort, setSort] = React.useState("latest");
   const [me, setMe] = React.useState<{
     id: string;
     teamId: string;
@@ -128,9 +131,10 @@ export default function CreatorsPage() {
     if (filters.platform) params.set("platform", filters.platform);
     if (filters.pool && filters.pool !== "all-pool") params.set("pool", filters.pool);
     if (filters.owner) params.set("owner", filters.owner);
-    if (filters.gender) params.set("gender", filters.gender);
-    if (filters.shopify) params.set("shopify", filters.shopify);
-    if (filters.niche) params.set("niche", filters.niche);
+    if (sort && sort !== "latest") params.set("sort", sort);
+    if (filters.gender && filters.gender !== "all-gender") params.set("gender", filters.gender);
+    if (filters.shopify && filters.shopify !== "all-shopify") params.set("shopify", filters.shopify);
+    if (filters.niche && filters.niche !== "all-niche") params.set("niche", filters.niche);
     if (filters.pending) params.set("pending", "1");
     if (filters.incomplete) params.set("incomplete", "1");
     if (filters.overdue) params.set("overdue", "1");
@@ -145,7 +149,7 @@ export default function CreatorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedQ, filters]);
+  }, [debouncedQ, filters, sort]);
 
   React.useEffect(() => {
     load();
@@ -163,6 +167,19 @@ export default function CreatorsPage() {
       })
       .catch(() => {});
   }, [load]);
+
+  const activeTrigger = (active: boolean) =>
+    active ? "border-primary/60 bg-primary/5 font-medium text-primary" : "";
+  const smartCount = [filters.incomplete, filters.overdue, filters.upcoming, filters.pending].filter(Boolean).length;
+
+  const SORT_OPTIONS: { value: string; label: string }[] = [
+    { value: "latest", label: "Recently updated" },
+    { value: "oldest", label: "Least recently updated" },
+    { value: "name-asc", label: "Name A–Z" },
+    { value: "name-desc", label: "Name Z–A" },
+    { value: "created-desc", label: "Newest added" },
+    { value: "created-asc", label: "Oldest added" },
+  ];
 
   return (
     <div className="space-y-5">
@@ -215,7 +232,7 @@ export default function CreatorsPage() {
           </TabsList>
         </Tabs>
         <Select value={filters.team} onValueChange={(v) => setFilters((f) => ({ ...f, team: v }))}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className={cn("w-40", activeTrigger(filters.team !== "all-team"))}>
             <SelectValue placeholder="All teams" />
           </SelectTrigger>
           <SelectContent>
@@ -227,7 +244,7 @@ export default function CreatorsPage() {
           </SelectContent>
         </Select>
         <Select value={filters.stage} onValueChange={(v) => setFilters((f) => ({ ...f, stage: v }))}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className={cn("w-40", activeTrigger(filters.stage !== "all-stage"))}>
             <SelectValue placeholder="All stages" />
           </SelectTrigger>
           <SelectContent>
@@ -243,10 +260,11 @@ export default function CreatorsPage() {
           value={filters.platform}
           onValueChange={(v) => setFilters((f) => ({ ...f, platform: v }))}
         >
-          <SelectTrigger className="w-40">
+          <SelectTrigger className={cn("w-40", activeTrigger(filters.platform !== "all-platform"))}>
             <SelectValue placeholder="All platforms" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all-platform">All platforms</SelectItem>
             {["INSTAGRAM", "TIKTOK", "YOUTUBE", "X", "SNAPCHAT", "FACEBOOK", "LINKEDIN", "TWITCH"].map(
               (p) => (
                 <SelectItem key={p} value={p}>
@@ -257,7 +275,7 @@ export default function CreatorsPage() {
           </SelectContent>
         </Select>
         <Select value={filters.pool} onValueChange={(v) => setFilters((f) => ({ ...f, pool: v }))}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className={cn("w-40", activeTrigger(filters.pool !== "all-pool"))}>
             <SelectValue placeholder="All availability" />
           </SelectTrigger>
           <SelectContent>
@@ -270,7 +288,7 @@ export default function CreatorsPage() {
           value={filters.gender}
           onValueChange={(v) => setFilters((f) => ({ ...f, gender: v }))}
         >
-          <SelectTrigger className="w-36">
+          <SelectTrigger className={cn("w-36", activeTrigger(filters.gender !== "all-gender"))}>
             <SelectValue placeholder="All genders" />
           </SelectTrigger>
           <SelectContent>
@@ -286,7 +304,7 @@ export default function CreatorsPage() {
           value={filters.shopify}
           onValueChange={(v) => setFilters((f) => ({ ...f, shopify: v }))}
         >
-          <SelectTrigger className="w-36">
+          <SelectTrigger className={cn("w-36", activeTrigger(filters.shopify !== "all-shopify"))}>
             <SelectValue placeholder="Shopify" />
           </SelectTrigger>
           <SelectContent>
@@ -299,7 +317,7 @@ export default function CreatorsPage() {
           value={filters.niche}
           onValueChange={(v) => setFilters((f) => ({ ...f, niche: v }))}
         >
-          <SelectTrigger className="w-40">
+          <SelectTrigger className={cn("w-40", activeTrigger(filters.niche !== "all-niche"))}>
             <SelectValue placeholder="All niches" />
           </SelectTrigger>
           <SelectContent>
@@ -311,13 +329,72 @@ export default function CreatorsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button
-          variant={filters.incomplete ? "secondary" : "outline"}
-          size="sm"
-          onClick={() => setFilters((f) => ({ ...f, incomplete: !f.incomplete }))}
-        >
-          Incomplete data{filters.incomplete ? " ✓" : ""}
-        </Button>
+        <Select value={sort} onValueChange={setSort}>
+          <SelectTrigger className="w-44">
+            <ArrowUpDown className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+            <SelectValue placeholder="Sort" />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <Button
+              variant={smartCount ? "secondary" : "outline"}
+              size="sm"
+              className={smartCount ? "gap-1.5 border-primary/50 bg-primary/5 text-primary" : "gap-1.5"}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Smart filters{smartCount ? ` (${smartCount})` : ""}
+            </Button>
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Content
+              align="start"
+              sideOffset={4}
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              className="z-50 w-60 rounded-md border bg-popover p-1.5 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+            >
+              <p className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Smart filters
+              </p>
+              {(
+                [
+                  { key: "incomplete", label: "Incomplete data" },
+                  { key: "overdue", label: "Overdue" },
+                  { key: "upcoming", label: "Upcoming deliverables" },
+                  { key: "pending", label: "Pending approval" },
+                ] as const
+              ).map(({ key, label }) => {
+                const active = filters[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setFilters((f) => ({ ...f, [key]: !f[key] }))}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                  >
+                    <span
+                      className={
+                        active
+                          ? "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-primary bg-primary text-primary-foreground"
+                          : "flex h-4 w-4 shrink-0 items-center justify-center rounded border border-input"
+                      }
+                    >
+                      {active ? <Check className="h-3 w-3" /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{label}</span>
+                  </button>
+                );
+              })}
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
       </div>
 
       {loading ? (

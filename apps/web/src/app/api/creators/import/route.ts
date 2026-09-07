@@ -7,6 +7,7 @@ import {
   validateCreatorInput,
   validateProfileEntry,
   findDuplicateProfile,
+  findDuplicatePhone,
 } from "@/lib/creators";
 import { logActivity, logTransaction } from "@/lib/activity";
 import type { SessionUser } from "@/lib/auth";
@@ -195,7 +196,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const profilesInput = platformHandles.map((p, i) => ({ platform: p.platform, input: p.value, isPrimary: i === 0 }));
+    const profilesInput = platformHandles.map((p, i) => {
+      const value = p.value.trim();
+      const compliant = !looksLikeUrl(value) && !value.startsWith("@") ? `@${value}` : value;
+      return { platform: p.platform, input: compliant, isPrimary: i === 0 };
+    });
 
     if (!name) {
       results.push({ name: profilesInput[0]?.input || "(no name)", status: "failed", message: "Creator name is required." });
@@ -250,7 +255,7 @@ export async function POST(req: NextRequest) {
       if (dupEmail) skipReasons.push(`Email ${d.email} already belongs to ${dupEmail.name}.`);
     }
     if (d.phone) {
-      const dupPhone = await prisma.creator.findUnique({ where: { phone: d.phone } });
+      const dupPhone = await findDuplicatePhone(d.phone);
       if (dupPhone) skipReasons.push(`Phone ${d.phone} already belongs to ${dupPhone.name}.`);
     }
     for (const p of validated) {

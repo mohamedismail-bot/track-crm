@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, Pencil, Plus, Save, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Save, Trash2, Upload, X, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -627,6 +627,20 @@ export default function SettingsPage() {
             onChanged={loadReference}
             onToast={(title, variant) => toast({ title, variant })}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Stages & pipeline</CardTitle>
+          <CardDescription>
+            Create, rename, reorder, and delete outreach stages. Every team starts from the same
+            global list; each team keeps its own order. Stages with active engagements cannot be
+            deleted.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StagesCard />
         </CardContent>
       </Card>
 
@@ -1288,4 +1302,189 @@ function RefList({
       ) : null}
     </div>
   );
+}
+
+interface StageRow {
+  id: string;
+  name: string;
+  order: number;
+  isCompleted?: boolean;
+}
+
+function StagesCard() {
+  const [stages, setStages] = React.useState<StageRow[]>([]);
+  const [newName, setNewName] = React.useState("");
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameValue, setRenameValue] = React.useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    const res = await fetch("/api/settings/stages");
+    if (!res.ok) return;
+    const j = await res.json();
+    setStages(j.stages ?? []);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async (method: string, body: unknown) => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/settings/stages", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast({ title: j.error ?? "Could not update stages", variant: "destructive" });
+        return false;
+      }
+      await load();
+      return true;
+    } catch {
+      toast({ title: "Could not update stages", variant: "destructive" });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = async () => {
+    const name = newName.trim();
+    if (!name || busy) return;
+    const ok = await run("POST", { name });
+    if (ok) {
+      setNewName("");
+      toast({ title: `Stage "${name}" added to every pipeline` });
+    }
+  };
+
+  const rename = async () => {
+    if (!renamingId || !renameValue.trim() || busy) return;
+    const ok = await run("PATCH", { action: "rename", id: renamingId, name: renameValue.trim() });
+    if (ok) {
+      setRenamingId(null);
+      toast({ title: "Stage renamed" });
+    }
+  };
+
+  const remove = async () => {
+    if (!confirmDeleteId || busy) return;
+    const res = await fetch(`/api/settings/stages?id=${confirmDeleteId}`, { method: "DELETE" });
+    const j = await res.json();
+    if (!res.ok) {
+      toast({ title: j.error ?? "Could not delete stage", variant: "destructive" });
+      setConfirmDeleteId(null);
+      return;
+    }
+    setConfirmDeleteId(null);
+    toast({ title: "Stage deleted" });
+    await load();
+  };
+
+  return (
+    <div className="space-y-4 pt-4">
+      {confirmDeleteId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Delete this stage?</CardTitle>
+              <CardDescription>
+                Engagements on this stage must be moved first. Teams will lose it from their pipelines.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void remove()}>
+                Delete
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      <div className="space-y-1.5">
+        {stages.map((s, i) => {
+          const renaming = renamingId === s.id;
+          return (
+            <div key={s.id} className="flex items-center gap-2 rounded-lg border border-border bg-card p-2">
+              {renaming ? (
+                <>
+                  <Input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void rename()}
+                    className="flex-1"
+                    autoFocus
+                  />
+                  <Button size="sm" variant="default" onClick={() => void rename()} disabled={busy}>
+                    <Save className="mr-1 h-4 w-4" /> Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRenamingId(null)}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
+                  <div className="flex items-center gap-0.5">
+                    <Button size="sm" variant="ghost" disabled={i === 0 || busy} onClick={() => void run("PATCH", { action: "move", id: s.id, dir: -1 })}>
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={i === stages.length - 1 || busy} onClick={() => void run("PATCH", { action: "move", id: s.id, dir: 1 })}>
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="Toggle completed stage"
+                    onClick={() => void run("PATCH", { action: "toggle-completed", id: s.id, completed: !s.isCompleted })}
+                    disabled={busy || s.isCompleted === undefined}
+                  >
+                    <Star className={cn("h-4 w-4", s.isCompleted ? "fill-amber-400 text-amber-500" : "text-muted-foreground")} />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setRenamingId(s.id); setRenameValue(s.name); }}>
+                    <Pencil className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDeleteId(s.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            </div>
+          );
+        })}
+        {stages.length === 0 ? (
+          <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+            No stages yet — add the first one below.
+          </p>
+        ) : null}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          placeholder="New stage name (e.g. Negotiation)"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void add()}
+        />
+        <Button onClick={() => void add()} disabled={busy || !newName.trim()}>
+          <Plus className="mr-1 h-4 w-4" /> Add stage
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function cn(...classes: (string | false | null | undefined)[]): string {
+  return classes.filter(Boolean).join(" ");
 }

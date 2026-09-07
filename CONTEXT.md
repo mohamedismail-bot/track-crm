@@ -13,7 +13,7 @@ A social account belonging to a **Creator** on a specific platform (e.g., Instag
 _Avoid_: Channel, page, account
 
 **Platform Handle**:
-The canonical username of a **Platform Profile**, derived from what the user enters: a bare handle (`mohamedismail`), an `@`-prefixed handle, or a full link (`https://www.instagram.com/mohamedismail`) — after stripping the protocol, `www.`, any leading `@`, trailing slashes, query parameters, and lowercasing. Stored once and unique per platform across all **Creators**. Used for matching in search, so a bare handle, an `@`-handle, and a full link all resolve to the same **Platform Profile**.
+The canonical username of a **Platform Profile**, derived from what the user enters: a bare handle (`mohamedismail`), an `@`-prefixed handle, or a full link (`https://www.instagram.com/mohamedismail`) — after stripping the protocol, `www.`, trailing slashes, query parameters, and lowercasing. Stored once and unique per platform across all **Creators**.
 _Avoid_: URL, link, username
 
 **Primary Platform Profile**:

@@ -6,9 +6,11 @@ import {
   handleFromInput,
   isValidEmail,
   isValidE164,
+  localDigitsOfE164,
   looksLikeUrl,
   normalizeHandleFromUrl,
   requiredForGiftingMissing,
+  strictProfileEntryError,
   urlPlatformMismatch,
 } from "./constants";
 import { Prisma } from "@prisma/client";
@@ -38,6 +40,7 @@ export interface CreateCreatorInput {
   engagementRate?: string | number;
   notes?: string;
   customFields?: Record<string, string | number | boolean | null>;
+  ownerIds?: string[];
   profiles: NewProfileInput[];
 }
 
@@ -79,6 +82,8 @@ export function validateProfileEntry(p: NewProfileInput): ValidatedProfile {
       `That looks like a ${detected} link — different from the selected platform. Check the entry or pick ${detected}.`,
     );
   }
+  const formatError = strictProfileEntryError(raw);
+  if (formatError) throw new Error(formatError);
   const handle = handleFromInput(raw);
   if (!handle) {
     throw new Error(
@@ -318,6 +323,24 @@ export async function checkPlatformHandle(platform: Platform, handle: string, ex
 }
 
 /**
+ * A phone number is unique per creator by its local digits, not only the full
+ * E.164 (so entering the same number under a different dial code is still a
+ * duplicate). Returns the conflicting creator, or null.
+ */
+export async function findDuplicatePhone(e164: string, excludeCreatorId?: string) {
+  if (!e164) return null;
+  const local = localDigitsOfE164(e164);
+  const others = await prisma.creator.findMany({
+    where: { deletedAt: null, phone: { not: null } },
+    select: { id: true, name: true, phone: true },
+  });
+  const match = others.find(
+    (c) => c.id !== excludeCreatorId && c.phone && localDigitsOfE164(c.phone) === local,
+  );
+  return match ?? null;
+}
+
+/**
  * Build the canonical profile URL (+ normalized handle) for a tolerant entry.
  */
 export async function buildValidatedProfiles(
@@ -412,8 +435,8 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
     if (dupEmail) throw new Error(`A creator with the email ${validation.data.email} already exists.`);
   }
   if (validation.data.phone) {
-    const dupPhone = await prisma.creator.findUnique({ where: { phone: validation.data.phone } });
-    if (dupPhone) throw new Error(`A creator with the phone ${validation.data.phone} already exists.`);
+    const dupPhone = await findDuplicatePhone(validation.data.phone);
+    if (dupPhone) throw new Error(`A creator with this phone number already exists (${dupPhone.name}).`);
   }
   for (const p of profiles) {
     const dup = await findDuplicateProfile(p.url, p.platform);
@@ -426,6 +449,26 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
 
   const settings = await import("./settings").then((m) => m.getSettings());
   const pendingApproval = settings.approvalEnabled && user.roleSlug !== "admin";
+
+  // Which users should own this creator? Defaults to the acting user. The
+  // dropdown list restricts assignments to the acting user's team, but guards
+  // here keep the Ownership Policy safe regardless of the client.
+  const ownerIds = Array.isArray(input.ownerIds)
+    ? Array.from(new Set(input.ownerIds.filter((id) => typeof id === "string" && id)))
+    : [];
+  const ownerRows =
+    ownerIds.length > 0
+      ? await prisma.user.findMany({ where: { id: { in: ownerIds }, archivedAt: null } })
+      : [];
+  if (ownerIds.length > 0 && ownerRows.length !== ownerIds.length) {
+    throw new Error("One of the selected owners is not a valid user.");
+  }
+  if (ownerRows.some((o) => o.teamId !== user.teamId) && !settings.multiTeam) {
+    throw new Error("Assignments are limited to your own team by the Ownership Policy.");
+  }
+  const ownerships = ownerRows.length
+    ? ownerRows.map((o) => ({ userId: o.id, teamId: o.teamId! }))
+    : [{ userId: user.id, teamId: user.teamId }];
 
   const created = await prisma.$transaction(async (tx) => {
     const creator = await tx.creator.create({
@@ -445,9 +488,7 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
         customFields: Object.keys(validation.data.customFields).length ? validation.data.customFields : undefined,
         createdById: user.id,
         approvalStatus: pendingApproval ? "PENDING" : null,
-        ownerships: pendingApproval
-          ? undefined
-          : { create: { userId: user.id, teamId: user.teamId } },
+        ownerships: pendingApproval ? undefined : { create: ownerships },
       },
     });
 
@@ -475,7 +516,9 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
     type: pendingApproval ? "CREATOR_CREATED" : "CREATOR_CREATED",
     summary: pendingApproval
       ? "Creator created — pending Team Manager approval"
-      : "Creator created and assigned to me",
+      : ownerships.length > 1
+        ? "Creator created and assigned to the team"
+        : "Creator created and assigned to me",
     description: `Platform profiles: ${profileSummary}`,
     authorId: user.id,
   });
@@ -525,6 +568,7 @@ export interface CreatorListFilters {
   city?: string;
   creatorType?: string;
   custom?: Record<string, string>;
+  sort?: "latest" | "oldest" | "name-asc" | "name-desc" | "created-desc" | "created-asc";
 }
 
 /**
@@ -628,6 +672,23 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
   };
   if (fieldFilters.length) where.AND = fieldFilters;
 
+  const orderBy: Prisma.CreatorOrderByWithRelationInput = (() => {
+    switch (filters.sort) {
+      case "name-asc":
+        return { name: "asc" };
+      case "name-desc":
+        return { name: "desc" };
+      case "created-desc":
+        return { createdAt: "desc" };
+      case "created-asc":
+        return { createdAt: "asc" };
+      case "oldest":
+        return { updatedAt: "asc" };
+      default:
+        return { updatedAt: "desc" };
+    }
+  })();
+
   const creators = await prisma.creator.findMany({
     where,
     include: {
@@ -641,7 +702,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
       creatorTypeRef: true,
       createdBy: { include: { team: true } },
     },
-    orderBy: { updatedAt: "desc" },
+    orderBy,
   });
 
   return creators
@@ -681,6 +742,7 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
       const isOtherTeam =
         !owns && !sameTeamOther && !unassigned && c.ownerships.some((o) => o.teamId !== user.teamId);
       const isManager = user.roleSlug === "team-manager";
+      const isAdmin = user.roleSlug === "admin";
 
       const missingGifting = requiredForGiftingMissing({
         countryId: c.countryId,
@@ -714,7 +776,10 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
         stage: currentStage ? { id: currentStage.id, name: currentStage.name } : null,
         currentEngagementId: latestEngagement?.id ?? null,
         completedAt: c.engagements.find((e) => e.completedAt)?.completedAt ?? null,
-        canMove: canMoveStage(user, owns, isManager),
+        canMove: isAdmin ? owns || sameTeamOther : canMoveStage(user, owns, isManager),
+        isOverdue:
+          !!nextDeliverable &&
+          nextDeliverable.dueDate.getTime() < new Date().getTime(),
         nextDeliverable: isOtherTeam
           ? null
           : nextDeliverable
