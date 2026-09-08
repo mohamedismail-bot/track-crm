@@ -339,7 +339,8 @@ export function CreatorFormDialog({
         setPhoneDup(null);
         return;
       }
-      if (expected == null && !opts?.allowPartial && digits.length < 6) {
+      if (expected == null && !opts?.allowPartial) {
+        // Unknown country length: wait for blur, never mid-typing.
         setPhoneDup(null);
         return;
       }

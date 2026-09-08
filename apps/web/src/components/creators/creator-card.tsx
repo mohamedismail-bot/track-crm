@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Users, CalendarClock, Flame, AlertTriangle, ExternalLink, ChevronDown } from "lucide-react";
+import { Users, CalendarClock, Flame, ExternalLink, ChevronDown } from "lucide-react";
 import type { Platform } from "@prisma/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import {
   formatDate,
   timeAgo,
 } from "@/lib/display";
+import { REQUIRED_FOR_GIFTING_LABELS } from "@/lib/constants";
 
 export interface CreatorListItem {
   id: string;
@@ -87,10 +88,23 @@ export function approvalBadge(c: CreatorListItem) {
 export function incompleteBadge(c: CreatorListItem) {
   if (c.approvalStatus) return null;
   if (!c.incompleteData) return null;
+  const missing = c.missingRequiredForGifting ?? [];
+  const label =
+    missing.length > 0
+      ? missing.map((m) => REQUIRED_FOR_GIFTING_LABELS[m] ?? m).join(", ")
+      : "Missing details";
   return (
-    <Badge variant="destructive" className="gap-1">
-      <AlertTriangle className="h-3 w-3" /> Incomplete data
-    </Badge>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/60 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <span className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+          Incomplete data
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Add missing info to enable gifting: {label}.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

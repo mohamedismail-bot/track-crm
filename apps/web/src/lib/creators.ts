@@ -14,7 +14,7 @@ import {
   urlPlatformMismatch,
 } from "./constants";
 import { Prisma } from "@prisma/client";
-import type { Platform } from "@prisma/client";
+import type { Platform, ApprovalStatus } from "@prisma/client";
 import { logActivity, logTransaction } from "./activity";
 import type { SessionUser } from "./auth";
 import { listCreatorFields, type CreatorFieldDef } from "./reference";
@@ -766,54 +766,52 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
     }
   }
 
+  const engagementConditions: Prisma.EngagementWhereInput[] = [];
+  if (filters.stage) engagementConditions.push({ stageId: filters.stage });
+  if (filters.overdue)
+    engagementConditions.push({
+      deliverables: { some: { status: { not: "APPROVED" }, dueDate: { lt: now } } },
+    });
+  if (filters.upcoming)
+    engagementConditions.push({
+      deliverables: {
+        some: { status: { not: "APPROVED" }, dueDate: { gte: now, lt: addDays(now, 7) } },
+      },
+    });
+
+  const and: Prisma.CreatorWhereInput[] = [
+    ...(filters.q ? [smartSearchWhere(filters.q)] : []),
+    ...(filters.niche ? [{ niche: { has: filters.niche } }] : []),
+    ...(filters.platform ? [{ profiles: { some: { platform: filters.platform as Platform } } }] : []),
+    ...(filters.owner ? [{ ownerships: { some: { userId: filters.owner } } }] : []),
+    ...(filters.gender ? [{ gender: filters.gender }] : []),
+    ...(filters.shopify === "yes" ? [{ shopifyRegistered: true }] : []),
+    ...(filters.shopify === "no" ? [{ shopifyRegistered: { equals: false } }] : []),
+    ...(filters.country ? [{ countryId: filters.country }] : []),
+    ...(filters.city ? [{ cityId: filters.city }] : []),
+    ...(filters.creatorType ? [{ creatorTypeId: filters.creatorType }] : []),
+    ...(engagementConditions.length ? [{ engagements: { some: { AND: engagementConditions } } }] : []),
+    ...(filters.pending
+      ? [{ approvalStatus: { in: ["PENDING", "REJECTED"] as ApprovalStatus[] } }]
+      : [{ approvalStatus: null }]),
+    ...(filters.incomplete
+      ? [{
+          OR: [
+            { countryId: null },
+            { cityId: null },
+            { creatorTypeId: null },
+            { phone: null },
+            { phone: "" },
+          ],
+        }]
+      : []),
+    ...(fieldFilters.length ? fieldFilters : []),
+  ];
+
   const where: Prisma.CreatorWhereInput = {
     deletedAt: null,
-    ...(filters.q ? smartSearchWhere(filters.q) : {}),
-    ...(filters.niche ? { niche: { has: filters.niche } } : {}),
-    ...(filters.platform ? { profiles: { some: { platform: filters.platform as Platform } } } : {}),
-    ...(filters.owner ? { ownerships: { some: { userId: filters.owner } } } : {}),
-    ...(filters.stage ? { engagements: { some: { stageId: filters.stage } } } : {}),
-    ...(filters.gender ? { gender: filters.gender } : {}),
-    ...(filters.shopify === "yes" ? { shopifyRegistered: true } : {}),
-    ...(filters.shopify === "no" ? { shopifyRegistered: { equals: false } } : {}),
-    ...(filters.country ? { countryId: filters.country } : {}),
-    ...(filters.city ? { cityId: filters.city } : {}),
-    ...(filters.creatorType ? { creatorTypeId: filters.creatorType } : {}),
-    ...(filters.overdue
-      ? {
-          engagements: {
-            some: {
-              deliverables: { some: { status: { not: "APPROVED" }, dueDate: { lt: now } } },
-            },
-          },
-        }
-      : {}),
-    ...(filters.upcoming
-      ? {
-          engagements: {
-            some: {
-              deliverables: {
-                some: {
-                  status: { not: "APPROVED" },
-                  dueDate: { gte: now, lt: addDays(now, 7) },
-                },
-              },
-            },
-          },
-        }
-      : {}),
-    ...(filters.pending
-      ? { approvalStatus: { in: ["PENDING", "REJECTED"] } }
-      : { approvalStatus: null }),
-    ...(filters.incomplete ? { OR: [
-        { countryId: null },
-        { cityId: null },
-        { creatorTypeId: null },
-        { phone: null },
-        { phone: "" },
-      ] } : {}),
+    ...(and.length ? { AND: and } : {}),
   };
-  if (fieldFilters.length) where.AND = fieldFilters;
 
   const orderBy: Prisma.CreatorOrderByWithRelationInput = (() => {
     switch (filters.sort) {

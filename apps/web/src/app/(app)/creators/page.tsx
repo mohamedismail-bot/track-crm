@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown, RotateCcw } from "lucide-react";
+import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown, RotateCcw, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,23 +50,21 @@ function GroupedCreatorCards({
   }
 
   const groups = new Map<string, CreatorListItem[]>();
+  const groupOrder: string[] = [];
   for (const c of creators) {
     let label: string;
     if (groupBy === "stage") label = c.stage?.name ?? "No stage";
     else if (groupBy === "owner") label = c.owners[0] ? `${c.owners[0].name} · ${c.owners[0].teamName}` : "Unassigned";
     else label = c.teams[0]?.name ?? "No team";
+    if (!groups.has(label)) groupOrder.push(label);
     const arr = groups.get(label) ?? [];
     arr.push(c);
     groups.set(label, arr);
   }
-  const order =
-    groupBy === "stage"
-      ? Array.from(groups.keys()).sort((a, b) => (a === "No stage" ? 1 : b === "No stage" ? -1 : a.localeCompare(b)))
-      : Array.from(groups.keys()).sort((a, b) => a.localeCompare(b));
 
   return (
     <div className="space-y-6">
-      {order.map((label) => (
+      {groupOrder.map((label) => (
         <section key={label}>
           <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
             {label}
@@ -111,13 +109,14 @@ export default function CreatorsPage() {
   ]);
   const [loading, setLoading] = React.useState(true);
   const [formOpen, setFormOpen] = React.useState(false);
+  const drillParam = !!(params.get("stage") || params.get("pool") || params.get("q") || (params.get("owner") && params.get("owner") !== "me") || params.get("pending") || params.get("overdue") || params.get("upcoming") || params.get("incomplete"));
   const [filters, setFilters] = React.useState({
     q: "",
     team: "all-team",
     stage: "all-stage",
     platform: "all-platform",
     pool: "all-pool",
-    owner: "",
+    owner: params.get("owner") === "me" ? "" : (params.get("owner") ?? ""),
     gender: "all-gender",
     shopify: "all-shopify",
     niche: "all-niche",
@@ -125,7 +124,7 @@ export default function CreatorsPage() {
     incomplete: params.get("incomplete") === "1",
     overdue: params.get("overdue") === "1",
     upcoming: params.get("upcoming") === "1",
-    myAssigned: false,
+    myAssigned: !drillParam,
   });
   const [sort, setSort] = React.useState("latest");
   const [me, setMe] = React.useState<{
@@ -143,13 +142,20 @@ export default function CreatorsPage() {
   React.useEffect(() => {
     fetch("/api/me")
       .then((r) => r.json())
-      .then(setMe)
+      .then((m) => {
+        setMe(m);
+        setFilters((f) => {
+          if (f.myAssigned && !f.owner && m?.id) return { ...f, owner: m.id };
+          if (!f.myAssigned && f.owner === (m?.id ?? "__none__") && !params.get("owner")) return { ...f, owner: "" };
+          return f;
+        });
+      })
       .catch(() => {});
     fetch("/api/reference")
       .then((r) => (r.ok ? r.json() : null))
       .then(setRefData)
       .catch(() => {});
-  }, []);
+  }, [params]);
 
   // Seed filters from URL params (deep links from the dashboard).
   React.useEffect(() => {
@@ -301,13 +307,25 @@ export default function CreatorsPage() {
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              className="w-48 pl-8 sm:w-56"
+              className="w-48 pl-8 pr-8 sm:w-56"
               placeholder="Search name, link, @handle, email or phone…"
               value={filters.q}
               onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
             />
+            {filters.q ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                title="Clear search"
+                tabIndex={-1}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                onClick={() => setFilters((f) => ({ ...f, q: "", }))}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
           {me?.canCreate ? (
             <Button onClick={() => setFormOpen(true)}>

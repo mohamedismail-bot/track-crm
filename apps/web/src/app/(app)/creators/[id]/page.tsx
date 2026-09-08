@@ -18,6 +18,10 @@ import {
   MapPin,
   ShieldAlert,
   Store,
+  MessageSquare,
+  StickyNote,
+  Clock,
+  FileText,
 } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -60,7 +64,6 @@ import {
   DealTypeBadge,
   DeliverableStatusBadge,
   GiftStatusBadge,
-  ActivityTypeLabel,
   initials,
   formatFollowerCount,
   formatMoney,
@@ -69,6 +72,7 @@ import {
   timeAgo,
   isOverdue,
 } from "@/lib/display";
+import { ACTIVITY_TYPE_LABELS } from "@/lib/constants";
 import { CreatorFormDialog, type EditableCreatorInput } from "@/components/creators/creator-form";
 import type { Platform, DealType, ApprovalStatus } from "@prisma/client";
 
@@ -173,6 +177,48 @@ interface CreatorDetail {
   unassignedVisibleFields: string[];
 }
 
+function activityIcon(type: string): React.ReactNode {
+  switch (type) {
+    case "CALL":
+      return <Phone className="h-3.5 w-3.5" />;
+    case "DM":
+      return <MessageSquare className="h-3.5 w-3.5" />;
+    case "EMAIL":
+      return <Mail className="h-3.5 w-3.5" />;
+    case "MEETING":
+      return <Calendar className="h-3.5 w-3.5" />;
+    case "NOTE":
+      return <StickyNote className="h-3.5 w-3.5" />;
+    default:
+      return <FileText className="h-3.5 w-3.5" />;
+  }
+}
+
+function activityTone(type: string): string {
+  switch (type) {
+    case "CALL":
+      return "text-sky-600 dark:text-sky-400";
+    case "DM":
+      return "text-violet-600 dark:text-violet-400";
+    case "EMAIL":
+      return "text-blue-600 dark:text-blue-400";
+    case "MEETING":
+      return "text-amber-600 dark:text-amber-400";
+    case "NOTE":
+      return "text-emerald-600 dark:text-emerald-400";
+    default:
+      return "text-muted-foreground";
+  }
+}
+
+function ActivityBadge({ type }: { type: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-semibold ${activityTone(type)}`}>
+      {ACTIVITY_TYPE_LABELS[type as keyof typeof ACTIVITY_TYPE_LABELS] ?? type}
+    </span>
+  );
+}
+
 function ActivityForm({ creatorId, canLog, onLogged }: { creatorId: string; canLog: boolean; onLogged: () => void }) {
   const [type, setType] = React.useState("NOTE");
   const [summary, setSummary] = React.useState("");
@@ -206,19 +252,24 @@ function ActivityForm({ creatorId, canLog, onLogged }: { creatorId: string; canL
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-lg border p-4">
+    <form onSubmit={submit} className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Log activity</p>
+        <span className="text-xs text-muted-foreground">{canLog ? "Notes appear in the timeline below" : "Read-only"}</span>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          {["CALL", "DM", "EMAIL", "MEETING", "NOTE"].map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+        <Select value={type} onValueChange={setType}>
+          <SelectTrigger className="w-32 shrink-0">
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            {(["CALL", "DM", "EMAIL", "MEETING", "NOTE"] as const).map((t) => (
+              <SelectItem key={t} value={t}>
+                {ACTIVITY_TYPE_LABELS[t]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
           className="flex-1"
           placeholder="Short summary of the interaction…"
@@ -235,9 +286,14 @@ function ActivityForm({ creatorId, canLog, onLogged }: { creatorId: string; canL
           <Upload className="h-4 w-4" />
         </Button>
         <Button type="submit" disabled={busy} size="sm">
-          Log
+          {busy ? "Logging…" : "Log"}
         </Button>
       </div>
+      <Input
+        placeholder="Add more detail (optional)…"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
       {file ? (
         <p className="text-xs text-muted-foreground">Attached: {file.name} ({Math.round(file.size / 1024)} KB)</p>
       ) : null}
@@ -771,35 +827,48 @@ export default function CreatorProfilePage() {
               {creator.activityLogs.length === 0 ? (
                 <div className="rounded-xl border p-8 text-center text-muted-foreground">No activity yet.</div>
               ) : (
-                creator.activityLogs.map((a) => (
-                  <Card key={a.id}>
-                    <CardContent className="pt-5">
-                      <div className="flex items-center gap-2 text-sm">
-                        <ActivityTypeLabel type={a.type} />
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {a.author?.displayName ?? "System"} · {timeAgo(a.loggedAt)}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm font-medium break-words">{a.summary}</p>
-                      {a.description ? <p className="mt-1 text-xs text-muted-foreground break-words">{a.description}</p> : null}
-                      {a.attachments.length ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {a.attachments.map((att) => (
-                            <a
-                              key={att.id}
-                              href={att.path}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-primary hover:bg-accent"
-                            >
-                              <Upload className="h-3 w-3" /> {att.filename}
-                            </a>
-                          ))}
+                <ol className="relative space-y-5 border-l-2 border-border pl-5">
+                  {creator.activityLogs.map((a) => (
+                    <li key={a.id} className="relative">
+                      <span className="absolute -left-[27px] top-1 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm">
+                        {activityIcon(a.type)}
+                      </span>
+                      <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <ActivityBadge type={a.type} />
+                          {a.author?.displayName ? (
+                            <span className="text-xs font-medium text-foreground">{a.author.displayName}</span>
+                          ) : null}
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {timeAgo(a.loggedAt)}
+                          </span>
                         </div>
-                      ) : null}
-                    </CardContent>
-                  </Card>
-                ))
+                        <p className="mt-1.5 text-sm font-semibold break-words">{a.summary}</p>
+                        {a.description ? (
+                          <p className="mt-1 rounded-lg bg-muted/50 px-3 py-2 text-sm text-muted-foreground break-words">
+                            {a.description}
+                          </p>
+                        ) : null}
+                        {a.attachments.length ? (
+                          <div className="mt-2.5 flex flex-wrap gap-2">
+                            {a.attachments.map((att) => (
+                              <a
+                                key={att.id}
+                                href={att.path}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-md border bg-accent/40 px-2 py-1 text-xs text-primary hover:bg-accent"
+                              >
+                                <FileText className="h-3.5 w-3.5" /> {att.filename}
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               )}
             </TabsContent>
 
