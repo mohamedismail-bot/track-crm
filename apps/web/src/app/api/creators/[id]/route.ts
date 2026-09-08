@@ -181,6 +181,63 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // UAT (per-field edit grants): a non-admin may only change the Creator
+    // fields the Admin has listed in Workspace Settings -> Creator editing
+    // permissions. Owner assignment is governed separately by resolveOwnerships.
+    if (session.roleSlug !== "admin") {
+      const { getSettings } = await import("@/lib/settings");
+      const settings = await getSettings();
+      const allowed = new Set(settings.creatorEditAllowedFields);
+
+      const fieldValueFor: Record<string, () => unknown> = {
+        name: () => creatorBefore.name,
+        countryId: () => creatorBefore.countryId,
+        cityId: () => creatorBefore.cityId,
+        creatorTypeId: () => creatorBefore.creatorTypeId,
+        gender: () => creatorBefore.gender,
+        shopifyRegistered: () => creatorBefore.shopifyRegistered,
+        niche: () => creatorBefore.niche,
+        followers: () => creatorBefore.followers,
+        engagementRate: () => creatorBefore.engagementRate,
+        notes: () => creatorBefore.notes,
+        customFields: () => creatorBefore.customFields,
+        profiles: () => creatorBefore.profiles?.map((p) => p.url),
+      };
+      const fieldKeyFor: Record<string, string> = {
+        name: "name",
+        countryId: "country",
+        cityId: "city",
+        creatorTypeId: "creatorType",
+        gender: "gender",
+        shopifyRegistered: "shopify",
+        niche: "niche",
+        followers: "followers",
+        engagementRate: "engagementRate",
+        notes: "notes",
+        customFields: "customFields",
+        profiles: "profiles",
+      };
+
+      for (const k of Object.keys(fieldKeyFor)) {
+        if (body[k] === undefined) continue;
+        const after: unknown = body[k];
+        const before = fieldValueFor[k]?.();
+        let changed: boolean;
+        if (k === "profiles") {
+          // Profiles are always governed by the protected-identity rules above.
+          continue;
+        }
+        if (Array.isArray(before) || (before !== null && typeof before === "object")) {
+          changed = JSON.stringify(before) !== JSON.stringify(after);
+        } else {
+          changed = before !== after;
+        }
+        if (changed && !allowed.has(fieldKeyFor[k])) {
+          return jsonError(`You do not have permission to change this creator field.`, 403);
+        }
+      }
+    }
+
     // Merge the submitted subset onto the current values so mandatory-field
     // and cross-field validation always runs against the final state.
     const merged: Record<string, unknown> = {

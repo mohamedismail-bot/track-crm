@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSettings, setSettingsMany } from "@/lib/settings";
-import { BRAND_COLORS, SETTING_KEYS } from "@/lib/constants";
+import { BRAND_COLORS, SETTING_KEYS, ALL_CREATOR_EDITABLE_FIELDS } from "@/lib/constants";
 import { jsonError, requireApiUser } from "@/lib/api-utils";
 import { storeUpload } from "@/lib/blob";
 
@@ -234,6 +234,21 @@ export async function PUT(req: NextRequest) {
     entries[SETTING_KEYS.UNASSIGNED_VISIBLE_FIELDS] = JSON.stringify(
       Array.from(new Set(["platformLink", "creatorName", ...cleaned])),
     );
+  }
+  if (body.creatorEditAllowedFields !== undefined) {
+    let opts: unknown = body.creatorEditAllowedFields;
+    if (typeof opts === "string") {
+      try {
+        opts = JSON.parse(opts);
+      } catch {
+        return jsonError("creatorEditAllowedFields must be a JSON array of strings.", 400);
+      }
+    }
+    const known = new Set(ALL_CREATOR_EDITABLE_FIELDS);
+    if (!Array.isArray(opts) || opts.some((o) => typeof o !== "string" || !known.has(o))) {
+      return jsonError("creatorEditAllowedFields contains an unknown field.", 400);
+    }
+    entries[SETTING_KEYS.CREATOR_EDIT_ALLOWED_FIELDS] = JSON.stringify(Array.from(new Set(opts as string[])));
   }
 
   if (Object.keys(entries).length === 0) return jsonError("No valid settings provided.", 400);

@@ -189,14 +189,10 @@ function StoryRingAvatar({ name }: { name: string }) {
 export function CreatorCard({
   creator,
   onStageChanged,
-  selected,
-  onToggleSelect,
   onReassigned,
 }: {
   creator: CreatorListItem;
   onStageChanged?: (creatorId: string, stage: { id: string; name: string } | null) => void;
-  selected?: boolean;
-  onToggleSelect?: (creatorId: string, selected: boolean) => void;
   onReassigned?: () => void;
 }) {
   const [currentStage, setCurrentStage] = React.useState<{ id: string; name: string } | null>(creator.stage);
@@ -205,7 +201,6 @@ export function CreatorCard({
     creator.nextDeliverable && new Date(creator.nextDeliverable.dueDate) < new Date()
       ? true
       : false;
-  const showCheck = onToggleSelect !== undefined;
 
   const handleStageChanged = (stage: { id: string; name: string }) => {
     setCurrentStage(stage);
@@ -214,33 +209,9 @@ export function CreatorCard({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div
-        className={`group relative flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm transition-colors ${
-          selected
-            ? "border-primary/70 ring-2 ring-primary/30"
-            : "border-border hover:border-primary/40 hover:bg-accent/40"
-        }`}
-      >
+      <div className="group relative flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm transition-colors border-border hover:border-primary/40 hover:bg-accent/40">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-3">
-            {showCheck ? (
-              <button
-                type="button"
-                onClick={() => onToggleSelect?.(creator.id, !selected)}
-                aria-label={selected ? "Deselect creator" : "Select creator"}
-                className={`mt-1 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border transition-colors ${
-                  selected
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-input bg-transparent hover:border-primary/60"
-                }`}
-              >
-                {selected ? (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : null}
-              </button>
-            ) : null}
             <StoryRingAvatar name={creator.name} />
             <div className="min-w-0">
               <Link
@@ -355,44 +326,55 @@ export function CreatorCard({
           ) : null}
         </div>
 
-        <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/60 pt-3">
-          {creator.owners.length > 0 ? (
-            <div className="flex items-center gap-1.5">
-              <div className="flex -space-x-2">
+        <div className="mt-auto border-t border-border/60 pt-3">
+          {creator.teams.length > 0 ? (
+            <Link
+              href={`/creators?team=${creator.teams[0].id}`}
+              className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-md bg-muted/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+              title={creator.teams.map((t) => t.name).join(", ")}
+            >
+              <Users className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {creator.teams.length === 1
+                  ? creator.teams[0].name
+                  : `${creator.teams[0].name} +${creator.teams.length - 1}`}
+              </span>
+            </Link>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {creator.owners.length > 0 ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
                 {creator.owners.slice(0, 3).map((o) => (
-                  <Tooltip key={o.id}>
-                    <TooltipTrigger asChild>
-                      <Link
-                        href={`/creators?owner=${o.id}`}
-                        title={`${o.name} · ${o.teamName}`}
-                        aria-label={`Filter by owner ${o.name}`}
-                        className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-[10px] font-medium text-secondary-foreground ring-2 ring-card transition-colors hover:bg-primary hover:text-primary-foreground"
-                      >
-                        {initials(o.name).slice(0, 2)}
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {o.name} · {o.teamName}
-                    </TooltipContent>
-                  </Tooltip>
+                  <Link
+                    key={o.id}
+                    href={`/creators?owner=${o.id}`}
+                    title={`${o.name}${o.teamName ? ` · ${o.teamName}` : ""}`}
+                    className="inline-flex items-center gap-1 rounded-full bg-secondary/60 py-0.5 pl-0.5 pr-2 text-[11px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary">
+                      {initials(o.name).slice(0, 2)}
+                    </span>
+                    <span className="max-w-[64px] truncate">{o.name.split(" ")[0]}</span>
+                  </Link>
                 ))}
+                {creator.owners.length > 3 ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{creator.owners.length - 3}
+                  </span>
+                ) : null}
               </div>
-              {creator.approvalStatus ? (
-                <span className="truncate text-[11px] text-muted-foreground">
-                  Requested by {creator.requestedBy?.name ?? "—"}
-                </span>
-              ) : null}
-            </div>
-          ) : creator.approvalStatus ? (
-            <span className="text-xs text-muted-foreground">
-              Requested by {creator.requestedBy?.name ?? "—"}
+            ) : (
+              <span className="text-xs text-muted-foreground">Unassigned</span>
+            )}
+            {creator.approvalStatus ? (
+              <span className="truncate text-[11px] text-muted-foreground">
+                Pending request by {creator.requestedBy?.name ?? "—"}
+              </span>
+            ) : null}
+            <span className="text-right text-[11px] leading-tight text-muted-foreground">
+              {creator.createdAt ? `Added ${timeAgo(creator.createdAt)}` : "—"}
             </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">Unassigned</span>
-          )}
-          <span className="text-right text-[11px] leading-tight text-muted-foreground">
-            {creator.createdAt ? `Added ${timeAgo(creator.createdAt)}` : "—"}
-          </span>
+          </div>
         </div>
         <ReassignCreatorDialog
           open={reassignOpen}

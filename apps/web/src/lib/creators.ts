@@ -744,10 +744,10 @@ export async function canBulkEditCreators(user: SessionUser): Promise<boolean> {
 /**
  * Resolve the final set of ownerships for an owner-IDs change (create, edit or
  * bulk reassign). Rules mirror creation: assignments are limited to the acting
- * user's team unless the Ownership Policy allows multiple teams, and Admin(s)
- * plus each involved team's Team Manager(s) are always owners (never removed).
- * Returns the ownership rows to write; throws a user-facing message on any
- * invalid or disallowed selection.
+ * user's own team unless the actor is an Admin or a Team Manager (who may
+ * assign across all teams); Admin(s) plus each involved team's Team Manager(s)
+ * are always owners (never removed). Returns the ownership rows to write;
+ * throws a user-facing message on any invalid or disallowed selection.
  */
 export async function resolveOwnerships(
   user: SessionUser,
@@ -767,9 +767,11 @@ export async function resolveOwnerships(
     if (ownerRows.length !== ownerIds.length) {
       throw new Error("One of the selected owners is not a valid user.");
     }
-    const settings = await import("./settings").then((m) => m.getSettings());
-    if (!settings.multiTeam && ownerRows.some((o) => o.teamId !== user.teamId)) {
-      throw new Error("Assignments are limited to your own team by the Ownership Policy.");
+    // UAT: only Admin and Team Managers may assign across all teams; everyone
+    // else can only pick from their own team (regardless of the multi-team policy).
+    const mayAssignCrossTeam = user.roleSlug === "admin" || user.roleSlug === "team-manager";
+    if (!mayAssignCrossTeam && ownerRows.some((o) => o.teamId !== user.teamId)) {
+      throw new Error("You can only assign creators to members of your own team.");
     }
     base = ownerRows.filter((o) => o.teamId != null).map((o) => ({ userId: o.id, teamId: o.teamId! }));
   } else if (opts.defaultToSelf !== false) {
@@ -883,7 +885,9 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
     ...(filters.owner ? [{ ownerships: { some: { userId: filters.owner } } }] : []),
     ...(filters.gender ? [{ gender: filters.gender }] : []),
     ...(filters.shopify === "yes" ? [{ shopifyRegistered: true }] : []),
-    ...(filters.shopify === "no" ? [{ shopifyRegistered: { equals: false } }] : []),
+    ...(filters.shopify === "no"
+      ? [{ OR: [{ shopifyRegistered: false }, { shopifyRegistered: null }] }]
+      : []),
     ...(filters.country ? [{ countryId: filters.country }] : []),
     ...(filters.city ? [{ cityId: filters.city }] : []),
     ...(filters.creatorType ? [{ creatorTypeId: filters.creatorType }] : []),

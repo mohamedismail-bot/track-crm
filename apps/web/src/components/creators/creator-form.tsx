@@ -120,6 +120,9 @@ export interface EditableCreatorInput {
   creatorTypeValue: string | null;
   canEdit?: boolean;
   canEditProtected?: boolean;
+  /** Fields this non-admin user is allowed to edit (admin-granted per-field grants). */
+  allowedFields?: string[];
+  canEditAllFields?: boolean;
 }
 
 interface CreatorFormProps {
@@ -156,7 +159,7 @@ export function CreatorFormDialog({
   const [workerOwnerIds, setWorkerOwnerIds] = React.useState<string[]>([]);
   const [ownerOptions, setOwnerOptions] = React.useState<OwnerOption[]>([]);
   const [hardOwnerIds, setHardOwnerIds] = React.useState<string[]>([]);
-  const [me, setMe] = React.useState<{ id: string; teamId: string | null } | null>(null);
+  const [me, setMe] = React.useState<{ id: string; teamId: string | null; roleSlug: string | null } | null>(null);
   const [followers, setFollowers] = React.useState("");
   const [engagementRate, setEngagementRate] = React.useState("");
   const [notes, setNotes] = React.useState("");
@@ -212,7 +215,7 @@ export function CreatorFormDialog({
         .map((o) => o.id);
       setHardOwnerIds(hard);
       if (me?.id) {
-        setMe((prev) => prev ?? { id: me.id, teamId: me.teamId ?? null });
+        setMe((prev) => prev ?? { id: me.id, teamId: me.teamId ?? null, roleSlug: me.roleSlug ?? null });
         setWorkerOwnerIds((prev) => (prev.length ? prev : [me.id]));
       }
       const stageList = (opts?.stages ?? []) as { id: string; name: string }[];
@@ -265,7 +268,7 @@ export function CreatorFormDialog({
       ]);
       if (cancelled) return;
       const m = mRes.ok ? await mRes.json() : null;
-      setMe(m ? { id: m.id, teamId: m.teamId ?? null } : null);
+      setMe(m ? { id: m.id, teamId: m.teamId ?? null, roleSlug: m.roleSlug ?? null } : null);
       const owners: OwnerOption[] = (optsRes.ok ? await optsRes.json() : null)?.owners?.map(
         (o: { id: string; displayName: string; teamId: string; roleSlug: string }) => ({
           id: o.id,
@@ -368,10 +371,21 @@ export function CreatorFormDialog({
   const nicheOptions = ref?.nicheOptions ?? [];
   const lockedProtected = mode === "edit" && initial?.canEditProtected === false;
   const emailLocked = mode === "edit" && initial?.canEditProtected === false && !!initial?.email;
+  const adminOrGranted = (key: string) => {
+    // New creator: everything is editable. In edit mode a non-admin may only
+    // change fields the Admin has granted (per-field edit permissions).
+    if (mode !== "edit" || initial?.canEditAllFields) return true;
+    if (lockedProtected && key === "name") return false;
+    return (initial?.allowedFields ?? []).includes(key);
+  };
   const hardOwners = ownerOptions.filter((o) => hardOwnerIds.includes(o.id));
-  const workerAssignable: MultiSelectOption[] = (me?.teamId
-    ? ownerOptions.filter((o) => !hardOwnerIds.includes(o.id) && o.teamId === me.teamId)
-    : ownerOptions.filter((o) => !hardOwnerIds.includes(o.id))
+  // UAT: non-admin / non-manager users may only assign members of their own
+  // team, regardless of the multi-team ownership policy.
+  const mayAssignCrossTeam = me?.roleSlug === "admin" || me?.roleSlug === "team-manager";
+  const workerAssignable: MultiSelectOption[] = (
+    mayAssignCrossTeam
+      ? ownerOptions.filter((o) => !hardOwnerIds.includes(o.id))
+      : ownerOptions.filter((o) => !hardOwnerIds.includes(o.id) && o.teamId === me?.teamId)
   ).map((o) => ({ value: o.id, label: o.displayName }));
 
   React.useEffect(() => {
@@ -640,13 +654,13 @@ export function CreatorFormDialog({
               <Label htmlFor="cf-name" className="inline-flex items-center gap-1">
                 Name <span className="text-destructive">*</span>
               </Label>
-              <Input id="cf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Creator name" disabled={lockedProtected} />
+              <Input id="cf-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Creator name" disabled={lockedProtected || !adminOrGranted("name")} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cf-gender" className="inline-flex items-center gap-1">
                 Gender <span className="text-destructive">*</span>
               </Label>
-              <Select value={gender} onValueChange={setGender}>
+              <Select value={gender} onValueChange={setGender} disabled={!adminOrGranted("gender")}>
                 <SelectTrigger id="cf-gender">
                   <SelectValue placeholder="Select gender" />
                 </SelectTrigger>
@@ -667,7 +681,7 @@ export function CreatorFormDialog({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@example.com"
-                disabled={emailLocked}
+                disabled={emailLocked || !adminOrGranted("email")}
               />
               {email.trim() && !/.+@.+\..+/.test(email.trim()) ? (
                 <p className="text-xs text-destructive">Enter a valid email address.</p>
@@ -682,7 +696,7 @@ export function CreatorFormDialog({
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="cf-phone">Phone {requiredFields.some((f) => f.key === "phone") ? <span className="text-destructive">*</span> : null}</Label>
               <div className="flex gap-2">
-                <Select value={phoneCountryId} onValueChange={setPhoneCountryId}>
+                <Select value={phoneCountryId} onValueChange={setPhoneCountryId} disabled={!adminOrGranted("phone")}>
                   <SelectTrigger className="w-32 shrink-0">
                     <SelectValue placeholder="Dial code" />
                   </SelectTrigger>
@@ -711,6 +725,7 @@ export function CreatorFormDialog({
                   }}
                   placeholder="1001234567 (digits only)"
                   aria-invalid={phoneDigitsMismatch}
+                  disabled={!adminOrGranted("phone")}
                   className={phoneDigitsMismatch ? "border-destructive" : ""}
                 />
               </div>
@@ -737,6 +752,7 @@ export function CreatorFormDialog({
               <Label htmlFor="cf-country">Country {requiredFields.some((f) => f.key === "country") ? <span className="text-destructive">*</span> : null}</Label>
               <Select
                 value={countryId}
+                disabled={!adminOrGranted("country")}
                 onValueChange={(v) => {
                   setCountryId(v);
                   setCityId("");
@@ -756,7 +772,7 @@ export function CreatorFormDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cf-city">City {requiredFields.some((f) => f.key === "city") ? <span className="text-destructive">*</span> : null}</Label>
-              <Select value={cityId} onValueChange={setCityId} disabled={!countryId}>
+              <Select value={cityId} onValueChange={setCityId} disabled={!countryId || !adminOrGranted("city")}>
                 <SelectTrigger id="cf-city">
                   <SelectValue placeholder={countryId ? "Select city" : "Pick a country first"} />
                 </SelectTrigger>
@@ -771,7 +787,7 @@ export function CreatorFormDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cf-type">Creator type {requiredFields.some((f) => f.key === "creatorType") ? <span className="text-destructive">*</span> : null}</Label>
-              <Select value={creatorTypeId} onValueChange={setCreatorTypeId}>
+              <Select value={creatorTypeId} onValueChange={setCreatorTypeId} disabled={!adminOrGranted("creatorType")}>
                 <SelectTrigger id="cf-type">
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
@@ -790,11 +806,11 @@ export function CreatorFormDialog({
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="cf-followers">Followers</Label>
-              <Input id="cf-followers" type="number" value={followers} onChange={(e) => setFollowers(e.target.value)} placeholder="120000" />
+              <Input id="cf-followers" type="number" value={followers} onChange={(e) => setFollowers(e.target.value)} placeholder="120000" disabled={!adminOrGranted("followers")} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cf-er">Engagement rate (%)</Label>
-              <Input id="cf-er" type="number" step="0.1" value={engagementRate} onChange={(e) => setEngagementRate(e.target.value)} placeholder="3.5" />
+              <Input id="cf-er" type="number" step="0.1" value={engagementRate} onChange={(e) => setEngagementRate(e.target.value)} placeholder="3.5" disabled={!adminOrGranted("engagementRate")} />
             </div>
             <div className="space-y-1.5 sm:col-span-3">
               <Label htmlFor="cf-niche" className="inline-flex items-center gap-1">
@@ -805,6 +821,7 @@ export function CreatorFormDialog({
                 options={nicheOptions.map((o) => ({ value: o, label: o }))}
                 value={niche}
                 onChange={setNiche}
+                disabled={!adminOrGranted("niche")}
                 placeholder={nicheOptions.length ? "Select niches…" : "No niche options yet"}
                 triggerClassName={nicheOptions.length ? "" : "text-muted-foreground"}
               />
@@ -821,7 +838,7 @@ export function CreatorFormDialog({
             </div>
             <div className="space-y-1.5 sm:col-span-3">
               <Label htmlFor="cf-notes">Notes</Label>
-              <Input id="cf-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything relevant about this creator" />
+              <Input id="cf-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything relevant about this creator" disabled={!adminOrGranted("notes")} />
             </div>
           </div>
 
@@ -830,7 +847,7 @@ export function CreatorFormDialog({
             <div className="space-y-3 rounded-lg border p-4">
               <Label className="text-sm font-semibold">Custom fields</Label>
               {customFields.map((f) => (
-                <CustomFieldInput key={f.id} field={f} value={custom[f.id!] ?? ""} onChange={(v) => handleCustomChange(f.id!, v)} />
+                <CustomFieldInput key={f.id} field={f} value={custom[f.id!] ?? ""} disabled={!adminOrGranted("customFields")} onChange={(v) => handleCustomChange(f.id!, v)} />
               ))}
             </div>
           ) : null}
@@ -910,7 +927,7 @@ export function CreatorFormDialog({
                       size="sm"
                       variant={active ? "default" : "outline"}
                       className="text-xs"
-                      disabled={false}
+                      disabled={mode === "edit" && !initial?.canEditProtected && !adminOrGranted("profiles")}
                       onClick={() => {
                         if (active) {
                           setProfiles((prev) => prev.filter((r) => r.platform !== p));
@@ -944,7 +961,7 @@ export function CreatorFormDialog({
                       value={row.input}
                       onChange={(e) => setProfile(i, { input: e.target.value })}
                       placeholder={row.platform === "OTHER" ? "e.g. https://tiktok.com/@myname" : `e.g. https://www.${PLATFORM_LABELS[row.platform].toLowerCase()}.com/handle`}
-                      disabled={lockedProtected}
+                      disabled={lockedProtected && !adminOrGranted("profiles")}
                       aria-invalid={!!muted || !!showError}
                       className={muted || showError ? "border-destructive" : ""}
                     />                    <Button
@@ -953,7 +970,7 @@ export function CreatorFormDialog({
                       variant="ghost"
                       title={row.isPrimary ? "Primary profile" : "Make primary"}
                       className={row.isPrimary ? "text-amber-500" : "text-muted-foreground"}
-                      disabled={lockedProtected}
+                      disabled={lockedProtected && !adminOrGranted("profiles")}
                       onClick={() => markPrimary(i)}
                     >
                       <Star className="h-4 w-4" fill={row.isPrimary ? "currentColor" : "none"} />
@@ -963,7 +980,7 @@ export function CreatorFormDialog({
                       size="icon"
                       variant="ghost"
                       className="shrink-0 text-muted-foreground"
-                      disabled={lockedProtected}
+                      disabled={lockedProtected && !adminOrGranted("profiles")}
                       onClick={() => setProfiles((prev) => prev.filter((_, j) => j !== i))}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -1023,10 +1040,12 @@ function CustomFieldInput({
   field,
   value,
   onChange,
+  disabled = false,
 }: {
   field: ReferenceField;
   value: string | number | boolean | null;
   onChange: (v: string | number | boolean | null) => void;
+  disabled?: boolean;
 }) {
   const label = `${field.label}${field.required ? " *" : ""} (${CREATOR_FIELD_TYPE_LABELS[field.type] ?? ""})`;
   if (field.type === "boolean") {
@@ -1036,6 +1055,7 @@ function CustomFieldInput({
           type="checkbox"
           className="h-4 w-4 accent-primary"
           checked={value === true}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
         />
         {label}
@@ -1046,7 +1066,7 @@ function CustomFieldInput({
     return (
       <div className="grid items-center gap-2 sm:grid-cols-[220px_1fr]">
         <Label>{label}</Label>
-        <Select value={String(value ?? "")} onValueChange={onChange}>
+        <Select value={String(value ?? "")} disabled={disabled} onValueChange={onChange}>
           <SelectTrigger>
             <SelectValue placeholder="Select…" />
           </SelectTrigger>
@@ -1066,7 +1086,7 @@ function CustomFieldInput({
     return (
       <div className="grid items-center gap-2 sm:grid-cols-[220px_1fr]">
         <Label>{label}</Label>
-        <Input type="date" value={String(value ?? "").slice(0, 10)} onChange={(e) => onChange(e.target.value || null)} />
+        <Input type="date" disabled={disabled} value={String(value ?? "").slice(0, 10)} onChange={(e) => onChange(e.target.value || null)} />
       </div>
     );
   }
@@ -1074,7 +1094,7 @@ function CustomFieldInput({
     return (
       <div className="grid items-center gap-2 sm:grid-cols-[220px_1fr]">
         <Label>{label}</Label>
-        <Input type="number" value={value == null ? "" : String(value)} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))} />
+        <Input type="number" disabled={disabled} value={value == null ? "" : String(value)} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))} />
       </div>
     );
   }
@@ -1085,10 +1105,11 @@ function CustomFieldInput({
         <textarea
           className="min-h-16 rounded-md border border-input bg-transparent px-3 py-2 text-sm"
           value={String(value ?? "")}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value || null)}
         />
       ) : (
-        <Input value={String(value ?? "")} onChange={(e) => onChange(e.target.value || null)} />
+        <Input disabled={disabled} value={String(value ?? "")} onChange={(e) => onChange(e.target.value || null)} />
       )}
     </div>
   );

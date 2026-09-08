@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
-import { BRAND_COLORS } from "@/lib/constants";
+import { BRAND_COLORS, CREATOR_EDITABLE_FIELDS } from "@/lib/constants";
 
 interface SettingsData {
   name: string;
@@ -47,6 +47,7 @@ interface SettingsData {
   customFieldsEnabled: boolean;
   approvalEnabled: boolean;
   unassignedVisibleFields: string[];
+  creatorEditAllowedFields: string[];
   stages: { id: string; name: string; isCompleted: boolean }[];
 }
 
@@ -177,6 +178,7 @@ export default function SettingsPage() {
       fd.append("customFieldsEnabled", data.customFieldsEnabled ? "true" : "false");
       fd.append("approvalEnabled", data.approvalEnabled ? "true" : "false");
       fd.append("unassignedVisibleFields", JSON.stringify(data.unassignedVisibleFields ?? ["platformLink", "creatorName"]));
+      fd.append("creatorEditAllowedFields", JSON.stringify(data.creatorEditAllowedFields ?? []));
       fd.append("exportEnabledRoles", JSON.stringify(data.exportEnabledRoles ?? []));
       fd.append("exportEnabledUserIds", JSON.stringify(data.exportEnabledUserIds ?? []));
       fd.append("bulkEditEnabledRoles", JSON.stringify(data.bulkEditEnabledRoles ?? []));
@@ -865,6 +867,43 @@ export default function SettingsPage() {
         onRolesChange={(v) => set("bulkEditEnabledRoles", v)}
         onUserIdsChange={(v) => set("bulkEditEnabledUserIds", v)}
       />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Creator editing permissions</CardTitle>
+          <CardDescription>
+            Grant non-admin team members the ability to edit specific creator fields. Admins always edit all fields.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            By default only the Admin can edit a creator&apos;s protected identity fields (name, email, platform profiles,
+            owners). Enable the fields below to let team members change them on creators they own or manage.
+          </p>
+          {CREATOR_EDITABLE_FIELDS.map((f) => (
+            <div key={f.key} className="flex items-center justify-between gap-4 rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-medium">{f.label}</p>
+              </div>
+              <Toggle
+                label=""
+                checked={(data.creatorEditAllowedFields ?? []).includes(f.key)}
+                onChange={(v) =>
+                  set(
+                    "creatorEditAllowedFields",
+                    v
+                      ? Array.from(new Set([...(data.creatorEditAllowedFields ?? []), f.key]))
+                      : (data.creatorEditAllowedFields ?? []).filter((k) => k !== f.key),
+                  )
+                }
+              />
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            Changes save with the main Save button.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

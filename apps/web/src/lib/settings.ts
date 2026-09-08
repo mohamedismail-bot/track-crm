@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "./prisma";
 import { DEFAULT_SETTINGS, DEFAULT_PRIMARY_COLOR, SETTING_KEYS } from "./constants";
+import { ALL_CREATOR_EDITABLE_FIELDS } from "./constants";
 
 export interface WorkspaceSettings {
   name: string;
@@ -25,6 +26,7 @@ export interface WorkspaceSettings {
   customFieldsEnabled: boolean;
   approvalEnabled: boolean;
   unassignedVisibleFields: string[];
+  creatorEditAllowedFields: string[];
 }
 
 export async function getSettings(): Promise<WorkspaceSettings> {
@@ -54,6 +56,9 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     customFieldsEnabled: all[SETTING_KEYS.CUSTOM_FIELDS_ENABLED] !== "false",
     approvalEnabled: all[SETTING_KEYS.APPROVAL_REQUIRED] === "true",
     unassignedVisibleFields: jsonArray(all[SETTING_KEYS.UNASSIGNED_VISIBLE_FIELDS]),
+    creatorEditAllowedFields: jsonArray(all[SETTING_KEYS.CREATOR_EDIT_ALLOWED_FIELDS]).length
+      ? jsonArray(all[SETTING_KEYS.CREATOR_EDIT_ALLOWED_FIELDS])
+      : ALL_CREATOR_EDITABLE_FIELDS,
   };
 }
 

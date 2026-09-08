@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { PERMISSIONS } from "@/lib/constants";
 import { canExportCreators, canBulkEditCreators } from "@/lib/creators";
+import { getSettings } from "@/lib/settings";
 
 export async function GET() {
   const user = await getSessionUser();
   if (!user) return NextResponse.json(null, { status: 401 });
+  const settings = await getSettings();
   return NextResponse.json({
     id: user.id,
     displayName: user.displayName,
@@ -20,5 +22,6 @@ export async function GET() {
     canCreate: user.permissions.includes(PERMISSIONS.CREATOR_CREATE),
     canExport: await canExportCreators(user),
     canBulkEdit: await canBulkEditCreators(user),
+    creatorEditAllowedFields: settings.creatorEditAllowedFields,
   });
 }

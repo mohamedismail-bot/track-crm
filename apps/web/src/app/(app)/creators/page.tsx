@@ -38,15 +38,11 @@ function GroupedCreatorCards({
   creators,
   groupBy,
   onStageChanged,
-  selectedIds,
-  onToggleSelect,
   onReassigned,
 }: {
   creators: CreatorListItem[];
   groupBy: GroupByKey;
   onStageChanged?: (id: string, stage: { id: string; name: string } | null) => void;
-  selectedIds?: Set<string>;
-  onToggleSelect?: (id: string) => void;
   onReassigned?: () => void;
 }) {
   if (creators.length === 0) {
@@ -64,8 +60,6 @@ function GroupedCreatorCards({
           key={c.id}
           creator={c}
           onStageChanged={onStageChanged}
-          selected={selectedIds?.has(c.id)}
-          onToggleSelect={onToggleSelect}
           onReassigned={onReassigned}
         />
       ))}
@@ -236,8 +230,9 @@ export default function CreatorsPage() {
     if (filters.incomplete) params.set("incomplete", "1");
     if (filters.overdue) params.set("overdue", "1");
     if (filters.upcoming) params.set("upcoming", "1");
+    if (groupBy && groupBy !== "none") params.set("group", groupBy);
     return params;
-  }, [debouncedQ, filters, sort]);
+  }, [debouncedQ, filters, groupBy, sort]);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -747,7 +742,10 @@ export default function CreatorsPage() {
                 key={key}
                 type="button"
                 aria-label={`View ${label}`}
-                onClick={() => setView(key)}
+                onClick={() => {
+                  setView(key);
+                  if (key !== "table") setSelectedIds(new Set());
+                }}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                   view === key
@@ -789,8 +787,8 @@ export default function CreatorsPage() {
         </Select>
       </div>
 
-      {/* Bulk edit bar (issue 6): appears once creators are selected */}
-      {me?.canBulkEdit && selectedIds.size > 0 ? (
+      {/* Bulk edit bar: only available in the table view (issue 6) */}
+      {me?.canBulkEdit && view === "table" && selectedIds.size > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
           <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
             <Check className="h-4 w-4" />
@@ -859,8 +857,6 @@ export default function CreatorsPage() {
           onStageChanged={(id, stage) =>
             setCreators((prev) => prev.map((c) => (c.id === id ? { ...c, stage } : c)))
           }
-          selectedIds={me?.canBulkEdit ? selectedIds : undefined}
-          onToggleSelect={me?.canBulkEdit ? toggleSelect : undefined}
           onReassigned={load}
         />
       ) : view === "table" ? (
@@ -883,8 +879,6 @@ export default function CreatorsPage() {
           creators={creators}
           stages={stages}
           groupBy={groupBy}
-          selectedIds={me?.canBulkEdit ? selectedIds : undefined}
-          onToggleSelect={me?.canBulkEdit ? toggleSelect : undefined}
           onReassigned={load}
         />
       )}

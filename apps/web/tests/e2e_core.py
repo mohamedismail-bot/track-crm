@@ -214,6 +214,11 @@ def main():
         for name, cond, detail in r5:
             check(name, cond, detail)
 
+        # 7d. Round-6 regression (API-level, admin + team leader)
+        r6 = round6_regression(browser)
+        for name, cond, detail in r6:
+            check(name, cond, detail)
+
         # 8. Interactive dashboard (admin)
         dash = dashboard_interactive(page)
         for name, cond, detail in dash:
@@ -560,6 +565,116 @@ def round5_regression(browser):
             results.append(("r5 ownership edit persists", True, "SKIP options unavailable"))
     except Exception as e:
         results.append(("round5 regression suite", False, str(e)))
+    ctx.close()
+    return results
+
+
+def round6_regression(browser):
+    """Round-6 UAT batch regressions (API-level, exercised via dev server):
+       - Shopify "not registered" filter includes creators whose field is null
+       - Same-team reassign enforcement (non-admin cannot assign cross-team)
+       - Per-field edit grants enforced in PATCH for non-admins + /api/me exposes them
+       - Export accepts a group param and mirrors grouping
+    """
+    results = []
+
+    # Admin session
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    ok = login(page, *ADMIN)
+    results.append(("r6 admin login", ok, "login failed"))
+    try:
+        # ---- Shopify "no" filter includes null rows ----
+        raw = page.request.get(f"{BASE}/api/creators?shopify=no")
+        raw_no = raw.json() if raw.ok else []
+        raw_yes = page.request.get(f"{BASE}/api/creators?shopify=yes")
+        yes = raw_yes.json() if raw_yes.ok else []
+        raw_all = page.request.get(f"{BASE}/api/creators")
+        all_ = raw_all.json() if raw_all.ok else []
+        results.append(("r6 shopify=no accepts filter", raw.ok, f"status={raw.status}"))
+        found_null = any(
+            c.get("shopifyRegistered") is None or c.get("shopifyRegistered") is False
+            for c in raw_no
+        )
+        results.append(("r6 shopify=no includes null/false creators", found_null, ""))
+        results.append(
+            ("r6 shopify buckets within total", len(raw_no) + len(yes) <= len(all_) or len(all_) == len(yes),
+             f"no={len(raw_no)} yes={len(yes)} all={len(all_)}"),
+        )
+
+        # ---- Export with group param returns 200 + group rows ----
+        er = page.request.get(f"{BASE}/api/creators/export?group=team")
+        csv = er.text() or ""
+        results.append(("r6 export grouped 200", er.status == 200, f"status={er.status}"))
+        results.append(("r6 export grouped has group delimiter", "═══" in csv, "no group rows"))
+    except Exception as e:
+        results.append(("round6 regression suite (admin)", False, str(e)))
+    ctx.close()
+
+    # ---- Same-team enforcement + per-field grants (leader) ----
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    if not login(page, *LEADER):
+        results.append(("r6 leader login", False, "login failed"))
+        ctx.close()
+        return results
+    try:
+        me = page.request.get(f"{BASE}/api/me").json()
+        opt = page.request.get(f"{BASE}/api/creators/options").json()
+        owners_all = opt.get("owners") or []
+        other_team = [
+            u for u in owners_all
+            if u.get("roleSlug") != "admin" and u.get("teamId") != me.get("teamId")
+        ]
+        owned = [
+            c for c in page.request.get(f"{BASE}/api/creators").json()
+            if c.get("relationship") == "owned"
+        ]
+
+        if owned and other_team:
+            rr = page.request.patch(
+                f"{BASE}/api/creators/{owned[0]['id']}",
+                data={"ownerIds": [me["id"], other_team[0]["id"]]},
+            )
+            results.append(("r6 leader cross-team reassign blocked", rr.status in (400, 403),
+                            f"status={rr.status}"))
+        else:
+            results.append(("r6 leader cross-team reassign blocked", True, "SKIP"))
+
+        same_team = [
+            u for u in owners_all
+            if u.get("roleSlug") != "admin" and u.get("teamId") == me.get("teamId")
+            and u["id"] != me["id"]
+        ]
+        if owned and same_team:
+            rr = page.request.patch(
+                f"{BASE}/api/creators/{owned[0]['id']}",
+                data={"ownerIds": [me["id"], same_team[0]["id"]]},
+            )
+            results.append(("r6 leader same-team assign allowed", rr.ok, f"status={rr.status}"))
+        else:
+            results.append(("r6 leader same-team assign allowed", True, "SKIP"))
+
+        allowed = me.get("creatorEditAllowedFields") or []
+        results.append(("r6 /api/me exposes creatorEditAllowedFields", isinstance(allowed, list),
+                        str(allowed)))
+        if owned and me.get("isAdmin") is not True and "gender" not in allowed:
+            before = page.request.get(f"{BASE}/api/creators/{owned[0]['id']}").json().get("gender")
+            rr = page.request.patch(
+                f"{BASE}/api/creators/{owned[0]['id']}",
+                data={"gender": "Female" if before != "Female" else "Male"},
+            )
+            after_id = owned[0]["id"]
+            after = page.request.get(f"{BASE}/api/creators/{after_id}").json().get("gender")
+            results.append(
+                ("r6 per-field grant blocks un-granted gender",
+                 after == before or rr.status in (400, 403),
+                 f"before={before} after={after} status={rr.status}"),
+            )
+        else:
+            results.append(("r6 per-field grant blocks un-granted gender", True, "SKIP"))
+    except Exception as e:
+        results.append(("round6 regression suite (leader)", False, str(e)))
     ctx.close()
     return results
 

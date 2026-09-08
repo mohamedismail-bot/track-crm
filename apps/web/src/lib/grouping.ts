@@ -23,6 +23,11 @@ export const GROUP_BY_OPTIONS: { value: GroupByKey; label: string }[] = [
   { value: "shopify", label: "Group by Shopify" },
 ];
 
+const GROUP_KEY_SET = new Set<string>(GROUP_BY_OPTIONS.map((o) => o.value));
+export function isGroupByKey(v: unknown): v is GroupByKey {
+  return typeof v === "string" && GROUP_KEY_SET.has(v);
+}
+
 export function groupValue(c: CreatorListItem, key: GroupByKey): string {
   switch (key) {
     case "stage":

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Platform } from "@prisma/client";
+import { profileHref } from "./constants";
 
 const ICON_SIZE = 16;
 
@@ -135,7 +136,7 @@ export function PlatformLogoBadge({
 
   return (
     <a
-      href={url}
+      href={profileHref(platform, url, handle)}
       target="_blank"
       rel="noreferrer"
       className="inline-flex items-center rounded transition-colors hover:text-foreground"

@@ -20,15 +20,11 @@ export function KanbanBoard({
   creators,
   stages,
   groupBy = "none",
-  selectedIds,
-  onToggleSelect,
   onReassigned,
 }: {
   creators: CreatorListItem[];
   stages: KanbanStage[];
   groupBy?: GroupByKey;
-  selectedIds?: Set<string>;
-  onToggleSelect?: (creatorId: string, selected: boolean) => void;
   onReassigned?: () => void;
 }) {
   const router = useRouter();
@@ -154,8 +150,6 @@ export function KanbanBoard({
           <CreatorCard
             creator={c}
             onStageChanged={handleCardStageChanged}
-            selected={selectedIds?.has(c.id)}
-            onToggleSelect={onToggleSelect}
             onReassigned={onReassigned}
           />
         </div>
@@ -260,8 +254,6 @@ export function KanbanBoard({
                 <div key={c.id} className="mb-2">
                   <CreatorCard
                     creator={c}
-                    selected={selectedIds?.has(c.id)}
-                    onToggleSelect={onToggleSelect}
                     onReassigned={onReassigned}
                   />
                 </div>

@@ -169,7 +169,31 @@ export const SETTING_KEYS = {
   CUSTOM_FIELDS_ENABLED: "creator.customFieldsEnabled",
   APPROVAL_REQUIRED: "approval.requireCreatorApproval",
   UNASSIGNED_VISIBLE_FIELDS: "visibility.unassignedVisibleFields",
+  CREATOR_EDIT_ALLOWED_FIELDS: "creator.editAllowedFields",
 } as const;
+
+/**
+ * Creator fields the Admin can selectively allow non-admin users to edit
+ * (Workspace Settings -> Creator editing permissions). Admins always edit all.
+ */
+export const CREATOR_EDITABLE_FIELDS: { key: string; label: string }[] = [
+  { key: "name", label: "Name" },
+  { key: "email", label: "Email" },
+  { key: "phone", label: "Phone" },
+  { key: "country", label: "Country" },
+  { key: "city", label: "City" },
+  { key: "creatorType", label: "Creator type" },
+  { key: "gender", label: "Gender" },
+  { key: "shopify", label: "Shopify registered" },
+  { key: "niche", label: "Niche" },
+  { key: "followers", label: "Followers" },
+  { key: "engagementRate", label: "Engagement rate" },
+  { key: "notes", label: "Notes" },
+  { key: "customFields", label: "Custom fields" },
+  { key: "profiles", label: "Platform profiles" },
+];
+
+export const ALL_CREATOR_EDITABLE_FIELDS = CREATOR_EDITABLE_FIELDS.map((f) => f.key);
 
 export interface BrandColor {
   label: string;
@@ -310,6 +334,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   [SETTING_KEYS.CUSTOM_FIELDS_ENABLED]: "true",
   [SETTING_KEYS.APPROVAL_REQUIRED]: "false",
   [SETTING_KEYS.UNASSIGNED_VISIBLE_FIELDS]: '["platformLink","creatorName"]',
+  [SETTING_KEYS.CREATOR_EDIT_ALLOWED_FIELDS]: JSON.stringify(ALL_CREATOR_EDITABLE_FIELDS),
 };
 
 // ---------------------------------------------------------------------------
@@ -444,6 +469,21 @@ export function canonicalProfileUrl(platform: string, handle: string): string {
   }
   if (platform === "LINKEDIN") return `https://${base}/in/${handle}`;
   return `https://${base}/${handle}`;
+}
+
+/**
+ * The href to use for a creator's platform profile: the stored link when it is
+ * a real URL, otherwise the canonical URL built from the platform + handle so
+ * an icon/link never navigates to an internal route.
+ */
+export function profileHref(
+  platform: Platform | string,
+  url?: string | null,
+  handle?: string | null,
+): string {
+  if (url && /^https?:\/\//i.test(url.trim())) return url.trim();
+  if (handle) return canonicalProfileUrl(platform, handle);
+  return url || "#";
 }
 
 export function normalizeHandleFromUrl(rawUrl: string): string {

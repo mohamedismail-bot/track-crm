@@ -72,7 +72,7 @@ import {
   timeAgo,
   isOverdue,
 } from "@/lib/display";
-import { ACTIVITY_TYPE_LABELS } from "@/lib/constants";
+import { ACTIVITY_TYPE_LABELS, profileHref } from "@/lib/constants";
 import { CreatorFormDialog, type EditableCreatorInput } from "@/components/creators/creator-form";
 import { StageChangeDialog, moveStageWithReason } from "@/components/creators/stage-change-dialog";
 import type { Platform, DealType, ApprovalStatus } from "@prisma/client";
@@ -323,7 +323,12 @@ export default function CreatorProfilePage() {
   const [rejectOpen, setRejectOpen] = React.useState(false);
   const [rejectReason, setRejectReason] = React.useState("");
   const [reviewBusy, setReviewBusy] = React.useState(false);
-  const [me, setMe] = React.useState<{ id: string; roleSlug: string } | null>(null);
+  const [me, setMe] = React.useState<{
+    id: string;
+    roleSlug: string;
+    isAdmin?: boolean;
+    creatorEditAllowedFields?: string[];
+  } | null>(null);
   const [refData, setRefData] = React.useState<{
     shopifyMinStageId: string | null;
     stages: { id: string; name: string; order: number }[];
@@ -404,6 +409,8 @@ export default function CreatorProfilePage() {
             cityValue: creator.cityRef?.name ?? null,
             creatorTypeValue: creator.creatorTypeRef?.name ?? null,
             canEditProtected: me?.roleSlug === "admin",
+            canEditAllFields: me?.isAdmin,
+            allowedFields: me?.creatorEditAllowedFields ?? [],
           }
         : null,
     [creator, me],
@@ -666,7 +673,7 @@ export default function CreatorProfilePage() {
                 creator.profiles.map((p) => (
                   <a
                     key={`${p.platform}-${p.handle}`}
-                    href={p.url}
+                    href={profileHref(p.platform, p.url, p.handle)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground"
@@ -1042,7 +1049,7 @@ export default function CreatorProfilePage() {
                     {creator.profiles.map((p) => (
                       <a
                         key={p.id}
-                        href={p.url}
+                        href={profileHref(p.platform, p.url, p.handle)}
                         target="_blank"
                         rel="noreferrer"
                         title={p.handle ? `@${p.handle} on ${p.platform}` : p.platform}
