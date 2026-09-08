@@ -727,6 +727,21 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Product catalog</CardTitle>
+          <CardDescription>
+            Categories and the products a gift order can be built from. The unit cost is set here,
+            shown read-only everywhere else, and snapshotted onto each order line when a gift is
+            requested — later edits never change historical orders. Categories in use cannot be
+            deleted.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CatalogCard />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Shopify module</CardTitle>
           <CardDescription>
             Control when the Shopify module becomes available on a creator&apos;s profile.
@@ -1717,6 +1732,287 @@ function StagesCard() {
 
 function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(" ");
+}
+
+interface CatalogProductRow {
+  id: string;
+  name: string;
+  categoryId: string;
+  unitCost: number;
+  active: boolean;
+}
+
+interface CatalogCategoryRow {
+  id: string;
+  name: string;
+  position: number;
+  products: CatalogProductRow[];
+}
+
+function CatalogCard() {
+  const [categories, setCategories] = React.useState<CatalogCategoryRow[]>([]);
+  const [newCategory, setNewCategory] = React.useState("");
+  const [newProduct, setNewProduct] = React.useState<Record<string, { name: string; cost: string }>>({});
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameValue, setRenameValue] = React.useState("");
+  const [editingProduct, setEditingProduct] = React.useState<string | null>(null);
+  const [editCost, setEditCost] = React.useState("");
+  const [confirmDelete, setConfirmDelete] = React.useState<{ kind: "category" | "product"; id: string; name: string } | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    const res = await fetch("/api/catalog");
+    if (!res.ok) return;
+    const j = await res.json();
+    setCategories(j.categories ?? []);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async (method: string, path: string, body: unknown): Promise<boolean> => {
+    setBusy(true);
+    try {
+      const res = await fetch(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast({ title: j.error ?? "Could not update catalog", variant: "destructive" });
+        return false;
+      }
+      await load();
+      return true;
+    } catch {
+      toast({ title: "Could not update catalog", variant: "destructive" });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addCategory = async () => {
+    const name = newCategory.trim();
+    if (!name || busy) return;
+    const ok = await run("POST", "/api/catalog", { kind: "category", name });
+    if (ok) {
+      setNewCategory("");
+      toast({ title: `Category "${name}" added` });
+    }
+  };
+
+  const addProduct = async (categoryId: string) => {
+    const entry = newProduct[categoryId];
+    const name = entry?.name.trim() ?? "";
+    const cost = entry?.cost.trim() ?? "";
+    if (!name || !cost || busy) return;
+    const ok = await run("POST", "/api/catalog", { kind: "product", name, categoryId, unitCost: Number(cost) });
+    if (ok) {
+      setNewProduct((m) => ({ ...m, [categoryId]: { name: "", cost: "" } }));
+      toast({ title: `Product "${name}" added` });
+    }
+  };
+
+  const rename = async () => {
+    if (!renamingId || !renameValue.trim() || busy) return;
+    const ok = await run("PATCH", `/api/catalog?kind=category&id=${renamingId}`, { name: renameValue.trim() });
+    if (ok) {
+      setRenamingId(null);
+      toast({ title: "Category renamed" });
+    }
+  };
+
+  const saveCost = async (p: CatalogProductRow) => {
+    if (busy) return;
+    const ok = await run("PATCH", `/api/catalog?kind=product&id=${p.id}`, { unitCost: Number(editCost) });
+    if (ok) {
+      setEditingProduct(null);
+      toast({ title: "Unit cost updated" });
+    }
+  };
+
+  const remove = async () => {
+    if (!confirmDelete || busy) return;
+    const ok = await run("DELETE", `/api/catalog?kind=${confirmDelete.kind}&id=${confirmDelete.id}`, {});
+    if (ok) {
+      setConfirmDelete(null);
+      toast({ title: confirmDelete.kind === "category" ? "Category deleted" : "Product deleted" });
+    }
+  };
+
+  return (
+    <div className="space-y-4 pt-4">
+      {confirmDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Delete &ldquo;{confirmDelete.name}&rdquo;?</CardTitle>
+              <CardDescription>
+                Categories with products and products used in historical gift orders cannot be
+                deleted.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void remove()}>
+                Delete
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      <div className="space-y-3">
+        {categories.length === 0 ? (
+          <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+            No categories yet — add the first one below.
+          </p>
+        ) : null}
+        {categories.map((c, i) => {
+          const renaming = renamingId === c.id;
+          const prodDraft = newProduct[c.id] ?? { name: "", cost: "" };
+          return (
+            <div key={c.id} className="rounded-lg border border-border bg-card p-2">
+              <div className="flex items-center gap-2">
+                {renaming ? (
+                  <>
+                    <Input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && void rename()}
+                      className="flex-1"
+                      autoFocus
+                    />
+                    <Button size="sm" variant="default" onClick={() => void rename()} disabled={busy}>
+                      <Save className="mr-1 h-4 w-4" /> Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRenamingId(null)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.name}</span>
+                    <span className="text-xs text-muted-foreground">{c.products.length} products</span>
+                    <div className="flex items-center gap-0.5">
+                      <Button size="sm" variant="ghost" disabled={i === 0 || busy} onClick={() => void run("PATCH", `/api/catalog?kind=category&id=${c.id}`, { dir: -1 })}>
+                        <ArrowUp className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={i === categories.length - 1 || busy} onClick={() => void run("PATCH", `/api/catalog?kind=category&id=${c.id}`, { dir: 1 })}>
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setRenamingId(c.id); setRenameValue(c.name); }}>
+                        <Pencil className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete({ kind: "category", id: c.id, name: c.name })}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-2 space-y-1.5 border-t border-border/60 pt-2">
+                {c.products.map((p) => {
+                  const editing = editingProduct === p.id;
+                  return (
+                    <div key={p.id} className="flex items-center gap-2 text-sm">
+                      <span className={cn("flex-1 truncate", !p.active && "text-muted-foreground line-through")}>{p.name}</span>
+                      {editing ? (
+                        <>
+                          <Input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            className="h-7 w-24"
+                            value={editCost}
+                            autoFocus
+                            onChange={(e) => setEditCost(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && void saveCost(p)}
+                          />
+                          <Button size="sm" variant="default" disabled={busy} onClick={() => void saveCost(p)}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingProduct(null)}>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                            {p.active ? (Math.round(p.unitCost * 100) / 100).toLocaleString("en-US", { style: "currency", currency: "EGP", maximumFractionDigits: 2 }) : "inactive"}
+                          </span>
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title={p.active ? "Deactivate" : "Activate"}
+                              onClick={() => void run("PATCH", `/api/catalog?kind=product&id=${p.id}`, { active: !p.active })}
+                              disabled={busy}
+                            >
+                              <Star className={cn("h-3.5 w-3.5", p.active ? "fill-amber-400 text-amber-500" : "text-muted-foreground")} />
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => { setEditingProduct(p.id); setEditCost(String(p.unitCost)); }}>
+                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete({ kind: "product", id: p.id, name: p.name })}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex gap-2 pt-1">
+                  <Input
+                    className="h-8 flex-1"
+                    placeholder="Product name (e.g. Velvet Duo Set)"
+                    value={prodDraft.name}
+                    onChange={(e) => setNewProduct((m) => ({ ...m, [c.id]: { name: e.target.value, cost: prodDraft.cost } }))}
+                    onKeyDown={(e) => e.key === "Enter" && void addProduct(c.id)}
+                  />
+                  <Input
+                    className="h-8 w-24"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    placeholder="Cost"
+                    value={prodDraft.cost}
+                    onChange={(e) => setNewProduct((m) => ({ ...m, [c.id]: { name: prodDraft.name, cost: e.target.value } }))}
+                    onKeyDown={(e) => e.key === "Enter" && void addProduct(c.id)}
+                  />
+                  <Button size="sm" onClick={() => void addProduct(c.id)} disabled={busy || !prodDraft.name.trim() || !prodDraft.cost.trim()}>
+                    <Plus className="mr-1 h-4 w-4" /> Add
+                  </Button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-2">
+        <Input
+          placeholder="New category (e.g. Skincare)"
+          value={newCategory}
+          onChange={(e) => setNewCategory(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void addCategory()}
+        />
+        <Button onClick={() => void addCategory()} disabled={busy || !newCategory.trim()}>
+          <Plus className="mr-1 h-4 w-4" /> Add category
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 interface GiftStatusRow {

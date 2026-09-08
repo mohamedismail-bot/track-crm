@@ -26,6 +26,9 @@ const daysFromNow = (d: number) => new Date(Date.now() + d * 86_400_000);
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
+const slugify = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "category";
+
 const GIFT_ACTIVITY_TYPE: Record<string, ActivityType> = {
   draft: ActivityType.GIFT_REQUESTED,
   pending_manager: ActivityType.GIFT_REQUESTED,
@@ -436,6 +439,52 @@ async function main() {
         },
       },
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Product catalog demo (admin-managed) — feeds the gift order form.
+  // -------------------------------------------------------------------------
+  const catalog = [
+    ["Skincare", [
+      ["Hydrating Face Serum", 780],
+      ["Vitamin C Cream", 640],
+      ["Gentle Cleanser", 410],
+      ["Skincare Gift Box", 1290],
+    ]],
+    ["Devices", [
+      ["Mini Facial Steamer", 1450],
+      ["LED Face Mask", 3200],
+      ["Hair Dryer Pro", 1890],
+    ]],
+    ["Apparel", [
+      ["Satin Lounge Set", 860],
+      ["Casual Hoodie", 520],
+      ["Brand Merch Tee", 290],
+    ]],
+    ["Home & Kitchen", [
+      ["Ceramic Cookware Set", 2600],
+      ["Velvet Duo Set", 1750],
+      ["Argan Oil Body Care Kit", 990],
+    ]],
+    ["Fitness", [
+      ["Fitness Starter Kit", 1350],
+      ["Resistance Bands Set", 450],
+      ["Yoga Mat Deluxe", 720],
+    ]],
+  ] as const;
+  for (const [catName, products] of catalog) {
+    const existingCat = await prisma.productCategory.findUnique({ where: { slug: slugify(catName) } });
+    const position = (await prisma.productCategory.aggregate({ _max: { position: true } }))._max.position ?? 0;
+    const cat = existingCat ??
+      await prisma.productCategory.create({
+        data: { name: catName, slug: slugify(catName), position: position + 1 },
+      });
+    for (const [pName, cost] of products) {
+      const exists = await prisma.product.findFirst({ where: { name: pName } });
+      if (!exists) {
+        await prisma.product.create({ data: { name: pName, categoryId: cat.id, unitCost: cost } });
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
