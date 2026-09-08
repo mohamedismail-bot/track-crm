@@ -119,9 +119,12 @@ def main():
         eng_creator = None
         if r_eng.ok:
             for c in r_eng.json():
-                # admin's team is Budget; pick a creator with an engagement
-                # and an ownership in the admin's team so the gift CTA shows
+                # admin's team is Budget; pick a creator with an engagement,
+                # one the admin's team works, and gifting-complete data so the
+                # gift CTA is actually enabled
                 if not c.get("currentEngagementId"):
+                    continue
+                if c.get("incompleteData"):
                     continue
                 owns_budget = any(
                     t.get("name") == "Budget Team" for t in c.get("teams", [])
@@ -201,6 +204,11 @@ def main():
         for name, cond, detail in flow:
             check(name, cond, detail)
 
+        # 7b. Phone duplicate-check regression (API-level, admin)
+        pflow = phone_uniqueness_flow(browser)
+        for name, cond, detail in pflow:
+            check(name, cond, detail)
+
         # 8. Interactive dashboard (admin)
         dash = dashboard_interactive(page)
         for name, cond, detail in dash:
@@ -267,6 +275,98 @@ def dashboard_interactive(page):
                         has_gifts_block and has_role, f"status={r.status}"))
     except Exception as e:
         results.append(("interactive dashboard", False, str(e)))
+    return results
+
+
+def phone_uniqueness_flow(browser):
+    """Regression for the add-creator phone bug: a brand-new number must NOT be
+    flagged as a duplicate (previously a greedy regex emptied every E.164's
+    local digits, so any number matched the first creator holding a phone).
+    A genuinely reused number must STILL be caught, and edit self-exclusion
+    (exclude=<id>) must pass."""
+    results = []
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    if not login(page, *ADMIN):
+        results.append(("phone duplicate-check login", False, "login failed"))
+        ctx.close()
+        return results
+    try:
+        import random
+
+        ref = page.request.get(f"{BASE}/api/reference").json()
+        egypt = next((c for c in ref.get("countries", []) if c.get("dialCode") == "+20"), None)
+        if not egypt:
+            results.append(("brand-new phone not flagged as duplicate", False, "no +20 country"))
+            ctx.close()
+            return results
+        # Gifting-complete reference data so these QA records don't trip the
+        # gift-dialog test (which skips creators with Incomplete Data).
+        city_id = egypt.get("cities", [{}])[0].get("id") if egypt.get("cities") else None
+        type_id = ref.get("creatorTypes", [{}])[0].get("id")
+
+        # A 10-digit local number (Egyptian style, prefixed with "1" so
+        # buildE164's leading-zero strip never alters it).
+        digits = "1" + "".join(random.choice("0123456789") for _ in range(9))
+        phone = f"+20{digits}"
+        r1 = page.request.get(f"{BASE}/api/creators/check?platform=PHONE&handle=%2B20{digits}")
+        results.append(
+            ("brand-new phone not flagged as duplicate",
+             r1.ok and r1.json().get("exists") is False,
+             f"phone={phone} resp={r1.json()}"),
+        )
+
+        name = f"QA Phone {datetime.now().strftime('%H%M%S')}"
+        r = page.request.post(
+            f"{BASE}/api/creators",
+            data={
+                "name": name,
+                "gender": "Male",
+                "phoneCountryId": egypt["id"],
+                "phoneNumber": digits,
+                "countryId": egypt["id"],
+                "cityId": city_id or None,
+                "creatorTypeId": type_id or None,
+                "profiles": [{"platform": "INSTAGRAM", "input": f"https://www.instagram.com/q{phone[1:]}", "isPrimary": True}],
+            },
+        )
+        created = r.json()
+        created_ok = r.status == 201 and created.get("id")
+        results.append(("create creator with brand-new phone succeeds", created_ok, f"status={r.status} body={created}"))
+        if not created_ok:
+            ctx.close()
+            return results
+        cid = created["id"]
+
+        r2 = page.request.get(f"{BASE}/api/creators/check?platform=PHONE&handle=%2B20{digits}")
+        results.append(
+            ("existing phone now flagged (true positive)",
+             r2.ok and r2.json().get("exists") is True,
+             f"resp={r2.json()}"),
+        )
+
+        r3 = page.request.get(f"{BASE}/api/creators/check?platform=PHONE&handle=%2B20{digits}&exclude={cid}")
+        results.append(
+            ("same creator excluded from its own phone check",
+             r3.ok and r3.json().get("exists") is False,
+             f"resp={r3.json()}"),
+        )
+
+        r4 = page.request.post(
+            f"{BASE}/api/creators",
+            data={
+                "name": f"QA Dup {datetime.now().strftime('%H%M%S')}",
+                "gender": "Female",
+                "phoneCountryId": egypt["id"],
+                "phoneNumber": digits,
+                "profiles": [{"platform": "TIKTOK", "input": f"https://www.tiktok.com/@qdup{digits}", "isPrimary": True}],
+            },
+        )
+        dup_rejected = r4.status == 400 and "phone" in (r4.json().get("error") or "").lower()
+        results.append(("duplicate phone create rejected", dup_rejected, f"status={r4.status} body={r4.json()}"))
+    except Exception as e:
+        results.append(("phone duplicate-check flow", False, str(e)))
+    ctx.close()
     return results
 
 

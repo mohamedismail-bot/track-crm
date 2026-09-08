@@ -6,7 +6,6 @@ import {
   handleFromInput,
   isValidEmail,
   isValidE164,
-  localDigitsOfE164,
   looksLikeUrl,
   normalizeHandleFromUrl,
   requiredForGiftingMissing,
@@ -326,17 +325,31 @@ export async function checkPlatformHandle(platform: Platform, handle: string, ex
 /**
  * A phone number is unique per creator by its local digits, not only the full
  * E.164 (so entering the same number under a different dial code is still a
- * duplicate). Returns the conflicting creator, or null.
+ * duplicate). The local digits are the digits after the country dial code,
+ * resolved against the workspace's Country list (longest matching dial code),
+ * so every stored/entered number is split the same way. Returns the first
+ * creator that already holds the same local number, or null.
  */
 export async function findDuplicatePhone(e164: string, excludeCreatorId?: string) {
   if (!e164) return null;
-  const local = localDigitsOfE164(e164);
+  const legalDialCodes = (await prisma.country.findMany({ select: { dialCode: true } }))
+    .map((c) => (c.dialCode ?? "").replace(/[^\d]/g, ""))
+    .filter((dc) => dc.length > 0);
+  const localOf = (phone: string) => {
+    const digits = phone.replace(/[^\d]/g, "");
+    let dial = "";
+    for (const dc of legalDialCodes) {
+      if (digits.startsWith(dc) && dc.length > dial.length) dial = dc;
+    }
+    return digits.slice(dial.length);
+  };
+  const local = localOf(e164);
   const others = await prisma.creator.findMany({
     where: { deletedAt: null, phone: { not: null } },
     select: { id: true, name: true, phone: true },
   });
   const match = others.find(
-    (c) => c.id !== excludeCreatorId && c.phone && localDigitsOfE164(c.phone) === local,
+    (c) => c.id !== excludeCreatorId && c.phone && localOf(c.phone) === local,
   );
   return match ?? null;
 }

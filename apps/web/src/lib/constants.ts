@@ -526,8 +526,3 @@ export function buildE164(dialCode: string, localDigits: string): string {
 export function isValidE164(phone: string): boolean {
   return /^\+\d{8,15}$/.test(phone);
 }
-
-/** Local digits of an E.164 phone — the number after the country dial code. */
-export function localDigitsOfE164(phone: string): string {
-  return phone.replace(/^\+\d+/, "").replace(/[^\d]/g, "");
-}

@@ -400,8 +400,9 @@ export function CreatorFormDialog({
       } catch {}
     }, 400);
     if (dialCountry?.phoneDigits == null) {
-      // Unknown country length: never flag mid-typing; the blur handler checks.
-      setPhoneDup(null);
+      // Unknown country length: no mid-typing check (the timer branch below is
+      // skipped), the blur handler is the only trigger. Keep whatever the blur
+      // handler set — do not wipe it here on every unrelated keystroke.
     } else {
       timers.push(setTimeout(() => void runPhoneDupCheck(phonePreview, phoneDigitsClean, dialCountry.phoneDigits), 400));
     }
