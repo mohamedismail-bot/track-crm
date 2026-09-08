@@ -4,7 +4,6 @@ import {
   ActivityType,
   DealType,
   DeliverableStatus,
-  GiftStatus,
   NotificationType,
   Platform,
 } from "@prisma/client";
@@ -13,8 +12,8 @@ import {
 // dashboard and list pages meaningful:
 //   - "Owned by me" creators across every pipeline stage
 //   - Overdue / upcoming deliverables
-//   - Gifts in every lifecycle stage (REQUESTED, APPROVED_QUEUED, DISPATCHED,
-//     DELIVERED, REJECTED) plus one exception request
+//   - Gifts in every lifecycle stage (pending_manager, approved, shipped,
+//     delivered, rejected) plus one exception request
 // Also mirrors each write into the Activity Log, Transaction Log, and (where
 // relevant) Notifications so every audit surface shows the same history.
 //
@@ -27,20 +26,22 @@ const daysFromNow = (d: number) => new Date(Date.now() + d * 86_400_000);
 const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000);
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
-const GIFT_ACTIVITY_TYPE: Record<GiftStatus, ActivityType> = {
-  REQUESTED: ActivityType.GIFT_REQUESTED,
-  APPROVED_QUEUED: ActivityType.GIFT_APPROVED,
-  DISPATCHED: ActivityType.GIFT_DISPATCHED,
-  DELIVERED: ActivityType.GIFT_DELIVERED,
-  REJECTED: ActivityType.GIFT_REJECTED,
+const GIFT_ACTIVITY_TYPE: Record<string, ActivityType> = {
+  draft: ActivityType.GIFT_REQUESTED,
+  pending_manager: ActivityType.GIFT_REQUESTED,
+  approved: ActivityType.GIFT_APPROVED,
+  shipped: ActivityType.GIFT_DISPATCHED,
+  delivered: ActivityType.GIFT_DELIVERED,
+  rejected: ActivityType.GIFT_REJECTED,
 };
 
-const GIFT_TRANSACTION_ACTION: Record<GiftStatus, string> = {
-  REQUESTED: "gift.request",
-  APPROVED_QUEUED: "gift.approve",
-  DISPATCHED: "gift.dispatch",
-  DELIVERED: "gift.deliver",
-  REJECTED: "gift.reject",
+const GIFT_TRANSACTION_ACTION: Record<string, string> = {
+  draft: "gift.request",
+  pending_manager: "gift.request",
+  approved: "gift.approve",
+  shipped: "gift.dispatch",
+  delivered: "gift.deliver",
+  rejected: "gift.reject",
 };
 
 async function main() {
@@ -258,10 +259,20 @@ async function main() {
     }
   }
 
+  let statusByKey: Map<string, string> | null = null;
+  async function giftStatusId(key: string): Promise<string> {
+    if (!statusByKey) {
+      statusByKey = new Map((await prisma.giftStatus.findMany()).map((s) => [s.key, s.id]));
+    }
+    const id = statusByKey.get(key);
+    if (!id) throw new Error('Gift status "' + key + '" not seeded. Run `prisma db seed` first.');
+    return id;
+  }
+
   interface GiftOpts {
     productName: string;
     productDescription?: string;
-    status: GiftStatus;
+    status: string;
     requesterId?: string;
     isException?: boolean;
     exceptionReason?: string;
@@ -278,28 +289,40 @@ async function main() {
     creatorId: string,
     opts: GiftOpts,
   ): Promise<void> {
-    const existing = await prisma.gift.findFirst({ where: { engagementId, productName: opts.productName } });
+    const existing = await prisma.gift.findFirst({
+      where: { engagementId, lines: { some: { productName: opts.productName } } },
+    });
     if (existing) return;
     const requesterId = opts.requesterId ?? linaId;
     const g = await prisma.gift.create({
       data: {
         engagementId,
-        productName: opts.productName,
-        productDescription: opts.productDescription,
         requestedById: requesterId,
         requestedAt: opts.requestedAt ?? hoursAgo(1),
         isException: opts.isException ?? false,
         exceptionReason: opts.exceptionReason,
-        status: opts.status,
-        approvedById: opts.status === GiftStatus.REQUESTED ? null : omarId,
+        statusId: await giftStatusId(opts.status),
+        currency: "EGP",
+        orderTotal: 0,
+        approvedById: opts.status === "pending_manager" ? null : omarId,
         approvedAt: opts.approvedAt,
         trackingNumber: opts.trackingNumber,
         carrier: opts.carrier,
         dispatchedAt: opts.dispatchedAt,
         deliveredAt: opts.deliveredAt,
+        lines: {
+          create: {
+            productName: opts.productName,
+            productDescription: opts.productDescription,
+            unitCost: 0,
+            quantity: 1,
+            lineTotal: 0,
+          },
+        },
       },
     });
-    const verb = opts.status === GiftStatus.REQUESTED || opts.status === GiftStatus.APPROVED_QUEUED ? requesterId : karimId;
+    const verb =
+      opts.status === "pending_manager" || opts.status === "approved" ? requesterId : karimId;
     await prisma.activityLog.create({
       data: {
         creatorId,
@@ -381,27 +404,36 @@ async function main() {
   // -------------------------------------------------------------------------
   // Gifts across every lifecycle stage (this month)
   // -------------------------------------------------------------------------
-  if (sarahEng) await ensureGift(sarahEng.id, sara!.id, { productName: "Velvet Duo Set", productDescription: "Perfume + body care", status: GiftStatus.REQUESTED, requestedAt: hoursAgo(2) });
-  if (khaled && eKhaled) await ensureGift(eKhaled.id, khaled.id, { productName: "Fitness Starter Kit", productDescription: "Resistance bands + mat", status: GiftStatus.DELIVERED, trackingNumber: "EG1002", carrier: "Aramex", requestedAt: daysAgo(6), approvedAt: daysAgo(5), dispatchedAt: daysAgo(4), deliveredAt: daysAgo(2) });
-  if (nourEng) await ensureGift(nourEng.id, nour!.id, { productName: "Ceramic Cookware Set", productDescription: "9-piece cookware", status: GiftStatus.APPROVED_QUEUED, requestedAt: daysAgo(1), approvedAt: hoursAgo(20) });
-  if (eDina) await ensureGift(eDina.id, cDina!.id, { productName: "Skincare Gift Box", productDescription: "Routine essentials", status: GiftStatus.DISPATCHED, trackingNumber: "EG1007", carrier: "DHL", requestedAt: daysAgo(3), approvedAt: daysAgo(2), dispatchedAt: hoursAgo(18) });
+  if (sarahEng) await ensureGift(sarahEng.id, sara!.id, { productName: "Velvet Duo Set", productDescription: "Perfume + body care", status: "pending_manager", requestedAt: hoursAgo(2) });
+  if (khaled && eKhaled) await ensureGift(eKhaled.id, khaled.id, { productName: "Fitness Starter Kit", productDescription: "Resistance bands + mat", status: "delivered", trackingNumber: "EG1002", carrier: "Aramex", requestedAt: daysAgo(6), approvedAt: daysAgo(5), dispatchedAt: daysAgo(4), deliveredAt: daysAgo(2) });
+  if (nourEng) await ensureGift(nourEng.id, nour!.id, { productName: "Ceramic Cookware Set", productDescription: "9-piece cookware", status: "approved", requestedAt: daysAgo(1), approvedAt: hoursAgo(20) });
+  if (eDina) await ensureGift(eDina.id, cDina!.id, { productName: "Skincare Gift Box", productDescription: "Routine essentials", status: "shipped", trackingNumber: "EG1007", carrier: "DHL", requestedAt: daysAgo(3), approvedAt: daysAgo(2), dispatchedAt: hoursAgo(18) });
   if (ahmedEng) {
-    await ensureGift(ahmedEng.id, ahmed!.id, { productName: "Affiliate Welcome Kit", productDescription: "Brand merch", status: GiftStatus.DELIVERED, trackingNumber: "EG1001", carrier: "Aramex", requestedAt: daysAgo(5), approvedAt: daysAgo(4), dispatchedAt: daysAgo(3), deliveredAt: daysAgo(1) });
-    await ensureGift(ahmedEng.id, ahmed!.id, { productName: "Ramadan Campaign Box", productDescription: "Second gift for the Ramadan activation", status: GiftStatus.REQUESTED, isException: true, exceptionReason: "Special Ramadan campaign needs an early second drop", requestedAt: hoursAgo(1) });
+    await ensureGift(ahmedEng.id, ahmed!.id, { productName: "Affiliate Welcome Kit", productDescription: "Brand merch", status: "delivered", trackingNumber: "EG1001", carrier: "Aramex", requestedAt: daysAgo(5), approvedAt: daysAgo(4), dispatchedAt: daysAgo(3), deliveredAt: daysAgo(1) });
+    await ensureGift(ahmedEng.id, ahmed!.id, { productName: "Ramadan Campaign Box", productDescription: "Second gift for the Ramadan activation", status: "pending_manager", isException: true, exceptionReason: "Special Ramadan campaign needs an early second drop", requestedAt: hoursAgo(1) });
   }
-  if (eSalma) await ensureGift(eSalma.id, cSalma!.id, { productName: "Satin Lounge Set", productDescription: "Pajama set", status: GiftStatus.REQUESTED, requesterId: mayaId, requestedAt: hoursAgo(4) });
+  if (eSalma) await ensureGift(eSalma.id, cSalma!.id, { productName: "Satin Lounge Set", productDescription: "Pajama set", status: "pending_manager", requesterId: mayaId, requestedAt: hoursAgo(4) });
 
   // One rejected gift for history context
-  const rejectedExists = await prisma.gift.count({ where: { status: GiftStatus.REJECTED } });
+  const rejectedExists = await prisma.gift.count({ where: { status: { is: { key: "rejected" } } } });
   if (!rejectedExists && nourEng) {
     await prisma.gift.create({
       data: {
         engagementId: nourEng.id,
-        productName: "Premium Blend Coffee Kit",
-        productDescription: "Rejected demo — over budget for the engagement",
         requestedById: linaId,
         requestedAt: daysAgo(8),
-        status: GiftStatus.REJECTED,
+        statusId: await giftStatusId("rejected"),
+        currency: "EGP",
+        orderTotal: 0,
+        lines: {
+          create: {
+            productName: "Premium Blend Coffee Kit",
+            productDescription: "Rejected demo — over budget for the engagement",
+            unitCost: 0,
+            quantity: 1,
+            lineTotal: 0,
+          },
+        },
       },
     });
   }

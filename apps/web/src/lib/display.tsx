@@ -4,8 +4,9 @@ import {
   DELIVERABLE_STATUS_LABELS,
   GIFT_STATUS_LABELS,
   ACTIVITY_TYPE_LABELS,
+  GIFT_STATUS_KEYS,
 } from "@/lib/constants";
-import type { Platform, DealType, DeliverableStatus, GiftStatus, ActivityType } from "@prisma/client";
+import type { Platform, DealType, DeliverableStatus, ActivityType } from "@prisma/client";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
 export { PlatformLogoBadge, PlatformLogoIcon } from "./platform-icons";
@@ -30,17 +31,18 @@ export function DeliverableStatusBadge({ status }: { status: DeliverableStatus |
   return <Badge variant={statusVariant[key]}>{DELIVERABLE_STATUS_LABELS[key] ?? status}</Badge>;
 }
 
-const giftVariant: Record<GiftStatus, BadgeProps["variant"]> = {
-  REQUESTED: "info",
-  APPROVED_QUEUED: "warning",
-  DISPATCHED: "secondary",
-  DELIVERED: "success",
-  REJECTED: "destructive",
+const giftVariant: Record<string, BadgeProps["variant"]> = {
+  [GIFT_STATUS_KEYS.DRAFT]: "secondary",
+  [GIFT_STATUS_KEYS.PENDING_MANAGER]: "info",
+  [GIFT_STATUS_KEYS.APPROVED]: "warning",
+  [GIFT_STATUS_KEYS.SHIPPED]: "secondary",
+  [GIFT_STATUS_KEYS.DELIVERED]: "success",
+  [GIFT_STATUS_KEYS.REJECTED]: "destructive",
 };
 
-export function GiftStatusBadge({ status }: { status: GiftStatus | (string & {}) }) {
-  const key = status as GiftStatus;
-  return <Badge variant={giftVariant[key]}>{GIFT_STATUS_LABELS[key] ?? status}</Badge>;
+export function GiftStatusBadge({ status }: { status: string }) {
+  const key = status ?? "";
+  return <Badge variant={giftVariant[key] ?? "secondary"}>{GIFT_STATUS_LABELS[key] ?? (key || "—")}</Badge>;
 }
 
 export function ActivityTypeLabel({ type }: { type: ActivityType | (string & {}) }) {

@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, initials, isOverdue } from "@/lib/display";
+import { GIFT_STATUS_KEYS } from "@/lib/constants";
 
 interface DashboardData {
   role: { roleSlug: string; isWarehouse: boolean; canApprove: boolean; canFulfill: boolean };
@@ -59,8 +60,8 @@ interface DashboardData {
 }
 
 function giftCounts(recent: DashboardData["gifts"]["recent"]) {
-  const pending = recent.filter((g) => g.status === "REQUESTED");
-  const queued = recent.filter((g) => g.status === "APPROVED_QUEUED");
+  const pending = recent.filter((g) => g.status === GIFT_STATUS_KEYS.PENDING_MANAGER);
+  const queued = recent.filter((g) => g.status === GIFT_STATUS_KEYS.APPROVED);
   return { pending, queued };
 }
 
@@ -125,14 +126,14 @@ export default function DashboardPage() {
               </StatCard>
               <StatCard icon={<Truck className="h-4 w-4" />} label="Dispatched this month" value={data.gifts.dispatchedThisMonth}
                 href="/gifting?tab=warehouse" expanded={openSections.dispatched} onToggle={() => toggle("dispatched")}>
-                <DetailList items={data.gifts.recent.filter((g) => g.status === "DISPATCHED").map((g) => ({
+                <DetailList items={data.gifts.recent.filter((g) => g.status === GIFT_STATUS_KEYS.SHIPPED).map((g) => ({
                   href: `/creators/${g.creatorId}`, primary: g.productName,
                   secondary: `${g.creatorName} · ${g.teamName}`,
                 }))} emptyText="No gifts dispatched this month." href="/gifting?tab=warehouse" />
               </StatCard>
               <StatCard icon={<PackageCheck className="h-4 w-4" />} label="Delivered this month" value={data.gifts.deliveredThisMonth}
                 href="/gifting?tab=history" expanded={openSections.delivered} onToggle={() => toggle("delivered")}>
-                <DetailList items={data.gifts.recent.filter((g) => g.status === "DELIVERED").map((g) => ({
+                <DetailList items={data.gifts.recent.filter((g) => g.status === GIFT_STATUS_KEYS.DELIVERED).map((g) => ({
                   href: `/creators/${g.creatorId}`, primary: g.productName,
                   secondary: `${g.creatorName} · ${g.teamName}`,
                 }))} emptyText="No gifts delivered this month." href="/gifting?tab=history" />
@@ -225,7 +226,7 @@ export default function DashboardPage() {
                 value={data.gifts.pendingExceptions}
                 warning={data.gifts.pendingExceptions > 0}
                 href="/gifting?tab=pending" expanded={openSections.gExceptions} onToggle={() => toggle("gExceptions")}>
-                <DetailList items={data.gifts.recent.filter((g) => g.isException && g.status === "REQUESTED").map((g) => ({
+                <DetailList items={data.gifts.recent.filter((g) => g.isException && g.status === GIFT_STATUS_KEYS.PENDING_MANAGER).map((g) => ({
                   href: `/creators/${g.creatorId}`, primary: g.productName,
                   secondary: `${g.creatorName} · ${g.teamName}`,
                 }))} emptyText="No exception requests pending." href="/gifting?tab=pending" />
@@ -239,7 +240,7 @@ export default function DashboardPage() {
               </StatCard>
               <StatCard icon={<PackageCheck className="h-4 w-4" />} label="Delivered this month" value={data.gifts.deliveredThisMonth}
                 href="/gifting?tab=history" expanded={openSections.gDelivered} onToggle={() => toggle("gDelivered")}>
-                <DetailList items={data.gifts.recent.filter((g) => g.status === "DELIVERED").map((g) => ({
+                <DetailList items={data.gifts.recent.filter((g) => g.status === GIFT_STATUS_KEYS.DELIVERED).map((g) => ({
                   href: `/creators/${g.creatorId}`, primary: g.productName,
                   secondary: `${g.creatorName} · ${g.teamName}`,
                 }))} emptyText="No gifts delivered this month." href="/gifting?tab=history" />

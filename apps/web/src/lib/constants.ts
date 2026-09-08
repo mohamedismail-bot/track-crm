@@ -1,4 +1,4 @@
-import { Platform, DealType, Currency, DeliverableStatus, GiftStatus, ActivityType } from "@prisma/client";
+import { Platform, DealType, Currency, DeliverableStatus, ActivityType, GiftApprovalRole } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // Permission tokens
@@ -17,6 +17,7 @@ export const PERMISSIONS = {
   GIFT_REQUEST: "gift.request",
   GIFT_APPROVE: "gift.approve",
   GIFT_FULFILL: "gift.fulfill",
+  CREDIT_VIEW: "credit.view",
   REQUEST_CREATE: "request.create",
   REQUEST_APPROVE: "request.approve",
   USER_MANAGE: "user.manage",
@@ -49,6 +50,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
     PERMISSIONS.DELIVERABLE_VERIFY,
     PERMISSIONS.GIFT_REQUEST,
     PERMISSIONS.GIFT_APPROVE,
+    PERMISSIONS.CREDIT_VIEW,
     PERMISSIONS.REQUEST_CREATE,
     PERMISSIONS.REQUEST_APPROVE,
     PERMISSIONS.REPORT_VIEW,
@@ -107,13 +109,112 @@ export const DELIVERABLE_STATUS_LABELS: Record<DeliverableStatus, string> = {
   REVISION_REQUESTED: "Revision Requested",
 };
 
-export const GIFT_STATUS_LABELS: Record<GiftStatus, string> = {
-  REQUESTED: "Requested",
-  APPROVED_QUEUED: "Approved / Queued",
-  DISPATCHED: "Dispatched",
-  DELIVERED: "Delivered",
-  REJECTED: "Rejected",
+// ---------------------------------------------------------------------------
+// Gift statuses (admin-managed rows; these keys are the seeded day-one set)
+// ---------------------------------------------------------------------------
+export const GIFT_STATUS_KEYS = {
+  DRAFT: "draft",
+  PENDING_MANAGER: "pending_manager",
+  APPROVED: "approved",
+  SHIPPED: "shipped",
+  DELIVERED: "delivered",
+  REJECTED: "rejected",
+} as const;
+
+export type GiftStatusKey = (typeof GIFT_STATUS_KEYS)[keyof typeof GIFT_STATUS_KEYS];
+
+/** Seeded gift statuses, cloned when the status table is empty (see ensureGiftStatuses). */
+export const DEFAULT_GIFT_STATUSES: {
+  key: string;
+  label: string;
+  position: number;
+  approvalRole: GiftApprovalRole;
+  isDraft: boolean;
+  isRejection: boolean;
+  grantCredit: boolean;
+  spawnDeliverables: boolean;
+  warehouseStep: boolean;
+}[] = [
+  {
+    key: GIFT_STATUS_KEYS.DRAFT,
+    label: "Draft",
+    position: 0,
+    approvalRole: GiftApprovalRole.NONE,
+    isDraft: true,
+    isRejection: false,
+    grantCredit: false,
+    spawnDeliverables: false,
+    warehouseStep: false,
+  },
+  {
+    key: GIFT_STATUS_KEYS.PENDING_MANAGER,
+    label: "Pending Manager",
+    position: 1,
+    approvalRole: GiftApprovalRole.MANAGER,
+    isDraft: false,
+    isRejection: false,
+    grantCredit: false,
+    spawnDeliverables: false,
+    warehouseStep: false,
+  },
+  {
+    key: GIFT_STATUS_KEYS.APPROVED,
+    label: "Approved",
+    position: 2,
+    approvalRole: GiftApprovalRole.NONE,
+    isDraft: false,
+    isRejection: false,
+    grantCredit: false,
+    spawnDeliverables: true,
+    warehouseStep: true,
+  },
+  {
+    key: GIFT_STATUS_KEYS.SHIPPED,
+    label: "Shipped",
+    position: 3,
+    approvalRole: GiftApprovalRole.NONE,
+    isDraft: false,
+    isRejection: false,
+    grantCredit: false,
+    spawnDeliverables: false,
+    warehouseStep: true,
+  },
+  {
+    key: GIFT_STATUS_KEYS.DELIVERED,
+    label: "Delivered",
+    position: 4,
+    approvalRole: GiftApprovalRole.NONE,
+    isDraft: false,
+    isRejection: false,
+    grantCredit: true,
+    spawnDeliverables: false,
+    warehouseStep: false,
+  },
+  {
+    key: GIFT_STATUS_KEYS.REJECTED,
+    label: "Rejected",
+    position: 5,
+    approvalRole: GiftApprovalRole.NONE,
+    isDraft: false,
+    isRejection: true,
+    grantCredit: false,
+    spawnDeliverables: false,
+    warehouseStep: false,
+  },
+];
+
+export const GIFT_STATUS_LABELS: Record<string, string> = {
+  [GIFT_STATUS_KEYS.DRAFT]: "Draft",
+  [GIFT_STATUS_KEYS.PENDING_MANAGER]: "Pending Manager",
+  [GIFT_STATUS_KEYS.APPROVED]: "Approved",
+  [GIFT_STATUS_KEYS.SHIPPED]: "Shipped",
+  [GIFT_STATUS_KEYS.DELIVERED]: "Delivered",
+  [GIFT_STATUS_KEYS.REJECTED]: "Rejected",
 };
+
+export function giftStatusLabel(key: string): string {
+  return GIFT_STATUS_LABELS[key] ?? key;
+}
 
 export const MANUAL_ACTIVITY_TYPES = ["CALL", "DM", "EMAIL", "MEETING", "NOTE"] as const;
 

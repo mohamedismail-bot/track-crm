@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/api-utils";
 import type { SessionUser } from "@/lib/auth";
 import { addDays, startOfMonth, endOfMonth, subDays } from "date-fns";
-import { DeliverableStatus, GiftStatus } from "@prisma/client";
+import { DeliverableStatus, GiftApprovalRole } from "@prisma/client";
 
 export async function GET() {
   const user = await requireApiUser();
@@ -70,28 +70,27 @@ export async function GET() {
       where: {
         engagement: giftTeamWhere,
         requestedAt: { gte: monthStart, lte: monthEnd },
-        status: { not: GiftStatus.REJECTED },
+        status: { is: { isDraft: false, isRejection: false } },
       },
     }),
     prisma.gift.count({
-      where: { status: GiftStatus.REQUESTED, engagement: giftTeamWhere },
+      where: { status: { is: { approvalRole: GiftApprovalRole.MANAGER } }, engagement: giftTeamWhere },
     }),
     prisma.gift.count({
-      where: { status: GiftStatus.REQUESTED, isException: true, engagement: giftTeamWhere },
+      where: { status: { is: { approvalRole: GiftApprovalRole.MANAGER } }, isException: true, engagement: giftTeamWhere },
     }),
     prisma.gift.count({
-      where: { status: GiftStatus.APPROVED_QUEUED, engagement: giftTeamWhere },
+      where: { status: { is: { spawnDeliverables: true } }, engagement: giftTeamWhere },
     }),
     prisma.gift.count({
       where: {
-        status: GiftStatus.DISPATCHED,
+        trackingNumber: { not: null },
         dispatchedAt: { gte: monthStart, lte: monthEnd },
         engagement: giftTeamWhere,
       },
     }),
     prisma.gift.count({
       where: {
-        status: GiftStatus.DELIVERED,
         deliveredAt: { gte: monthStart, lte: monthEnd },
         engagement: giftTeamWhere,
       },
@@ -126,7 +125,7 @@ export async function GET() {
         engagement: giftTeamWhere,
         requestedAt: { gte: subDays(now, 90) },
       },
-      include: { engagement: { include: { creator: true, team: true } } },
+      include: { status: true, lines: { orderBy: { id: "asc" } }, engagement: { include: { creator: true, team: true } } },
       orderBy: { requestedAt: "desc" },
       take: 100,
     }),
@@ -211,8 +210,8 @@ export async function GET() {
       topGiftedCreators,
       recent: recentGifts.map((g) => ({
         id: g.id,
-        productName: g.productName,
-        status: g.status,
+        productName: g.lines[0]?.productName ?? `${g.engagement.creator.name} gift`,
+        status: g.status.key,
         isException: g.isException,
         requestedAt: g.requestedAt,
         creatorId: g.engagement.creatorId,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiUser } from "@/lib/api-utils";
 import type { SessionUser } from "@/lib/auth";
-import { GiftStatus, type Prisma } from "@prisma/client";
+import { GiftApprovalRole, type Prisma } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   const user = await requireApiUser();
@@ -21,16 +21,19 @@ export async function GET(req: NextRequest) {
   const scopeToOwnTeam = !isWarehouse && session.roleSlug !== "admin" && !team;
 
   const where: Prisma.GiftWhereInput = {
-    ...(status ? { status: status as GiftStatus } : {}),
+    ...(status ? { status: { is: { key: status } } } : {}),
     ...(exception === "1" ? { isException: true } : {}),
     ...(team ? { engagement: { teamId: team } } : {}),
     ...(scopeToOwnTeam ? { engagement: { teamId: session.teamId } } : {}),
-    ...(pendingOnly ? { status: { in: [GiftStatus.REQUESTED] } } : {}),
+    // "Pending approval" = any status that currently requires a manager action.
+    ...(pendingOnly ? { status: { is: { approvalRole: GiftApprovalRole.MANAGER } } } : {}),
   };
 
   const gifts = await prisma.gift.findMany({
     where,
     include: {
+      status: true,
+      lines: { orderBy: { id: "asc" } },
       engagement: { include: { creator: true, team: true, deliverables: true } },
       requestedBy: true,
       approvedBy: true,
@@ -42,9 +45,20 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     gifts.map((g) => ({
       id: g.id,
-      productName: g.productName,
-      productDescription: g.productDescription,
-      status: g.status,
+      orderNumber: g.orderNumber,
+      productName: g.lines[0]?.productName ?? `${g.engagement.creator.name} gift`,
+      productDescription: g.lines[0]?.productDescription,
+      lines: g.lines,
+      orderTotal: g.orderTotal,
+      status: g.status.key,
+      statusKey: g.status.key,
+      statusLabel: g.status.label,
+      group:
+        g.status.approvalRole !== GiftApprovalRole.NONE
+          ? "pending"
+          : g.status.warehouseStep
+            ? "warehouse"
+            : "history",
       isException: g.isException,
       exceptionReason: g.exceptionReason,
       trackingNumber: g.trackingNumber,

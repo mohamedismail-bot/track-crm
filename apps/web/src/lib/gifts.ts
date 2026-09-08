@@ -3,9 +3,10 @@ import { prisma } from "./prisma";
 import { getSettings } from "./settings";
 import { logActivity, logTransaction } from "./activity";
 import { notify } from "./notify";
-import { requiredForGiftingMissing, REQUIRED_FOR_GIFTING_LABELS } from "./constants";
+import { requiredForGiftingMissing, REQUIRED_FOR_GIFTING_LABELS, GIFT_STATUS_KEYS } from "./constants";
+import { giftStatusId, giftProductName } from "./gift-status";
 import type { SessionUser } from "./auth";
-import { DealType, DeliverableStatus, GiftStatus } from "@prisma/client";
+import { DealType, DeliverableStatus } from "@prisma/client";
 
 export interface GiftRequestResult {
   ok: boolean;
@@ -14,7 +15,10 @@ export interface GiftRequestResult {
   gift?: { id: string };
 }
 
-/** Gifts already requested this calendar month, counted across all engagements/teams for a creator. */
+/**
+ * Gifts already requested this calendar month, counted across all engagements/teams
+ * for a creator. Drafts and rejections never count toward the cap.
+ */
 export async function countCreatorGiftsThisMonth(creatorId: string, when = new Date()) {
   const start = new Date(when.getFullYear(), when.getMonth(), 1);
   const end = new Date(when.getFullYear(), when.getMonth() + 1, 1);
@@ -22,7 +26,7 @@ export async function countCreatorGiftsThisMonth(creatorId: string, when = new D
     where: {
       engagement: { creatorId },
       requestedAt: { gte: start, lt: end },
-      status: { not: GiftStatus.REJECTED },
+      status: { is: { isDraft: false, isRejection: false } },
     },
   });
 }
@@ -35,10 +39,14 @@ export async function getLastGiftLockingDeliverable(creatorId: string): Promise<
   blockedBy: { gift: string; deliverables: string[] } | null;
 }> {
   const incidents = await prisma.gift.findMany({
-    where: { engagement: { creatorId }, status: { not: GiftStatus.REJECTED } },
+    where: {
+      engagement: { creatorId },
+      status: { is: { isDraft: false, isRejection: false } },
+    },
     orderBy: { requestedAt: "desc" },
     include: {
-      engagement: { include: { deliverables: true } },
+      lines: { orderBy: { id: "asc" } },
+      engagement: { include: { deliverables: true, creator: true } },
     },
   });
   const last = incidents[0];
@@ -57,7 +65,7 @@ export async function getLastGiftLockingDeliverable(creatorId: string): Promise<
 
   return {
     blockedBy: {
-      gift: last.productName,
+      gift: giftProductName(last),
       deliverables: pending.map((d) => d.title),
     },
   };
@@ -141,20 +149,21 @@ export async function canRequestGift(user: SessionUser, engagementId: string) {
 
 /**
  * Create a gift request. Returns { needsException } to trigger the manager approval
- * flow for a second gift in the month.
+ * flow for a second gift in the month. A first gift in the month is created directly
+ * in the "approved" (warehouse ready) status, preserving pre-order behavior.
  */
 export async function requestGift(
   user: SessionUser,
   engagementId: string,
   input: { productName: string; productDescription?: string },
 ): Promise<
-  | { ok: true; status: GiftStatus; message: string; giftId: string }
+  | { ok: true; status: string; message: string; giftId: string }
   | { ok: false; message: string; needsException?: boolean; blocked?: boolean; missingFields?: string[] }
 > {
   const check = await canRequestGift(user, engagementId);
   if (check.ok === false) {
     // A second gift in the same month needs manager approval: it is NOT a dead
-    // end — proceed in exception mode so the gift gets created as REQUESTED.
+    // end — proceed in exception mode so the gift gets created as pending manager.
     if (check.blocked || !check.needsException) {
       return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked, missingFields: check.missingFields };
     }
@@ -170,17 +179,28 @@ export async function requestGift(
   const isException =
     settings.giftMonthlyCapEnabled && (await countCreatorGiftsThisMonth(engagement.creatorId)) >= 1;
 
-  const status: GiftStatus = isException ? GiftStatus.REQUESTED : GiftStatus.APPROVED_QUEUED;
+  const targetKey = isException ? GIFT_STATUS_KEYS.PENDING_MANAGER : GIFT_STATUS_KEYS.APPROVED;
+  const statusId = await giftStatusId(targetKey);
+  const name = input.productName.trim();
+
   const gift = await prisma.gift.create({
     data: {
       engagementId,
-      productName: input.productName.trim(),
-      productDescription: input.productDescription,
       requestedById: user.id,
       isException,
-      status,
+      statusId,
+      currency: engagement.currency,
       approvedById: isException ? undefined : user.id,
       approvedAt: isException ? undefined : new Date(),
+      lines: {
+        create: {
+          productName: name,
+          productDescription: input.productDescription,
+          unitCost: 0,
+          quantity: 1,
+          lineTotal: 0,
+        },
+      },
     },
   });
 
@@ -191,7 +211,7 @@ export async function requestGift(
     summary: isException
       ? `Gift requested with exception approval`
       : `Gift requested and queued`,
-    description: `${input.productName}${isException ? " (exception: second gift this month)" : ""}`,
+    description: `${name}${isException ? " (exception: second gift this month)" : ""}`,
     authorId: user.id,
   });
   await logTransaction({
@@ -199,7 +219,7 @@ export async function requestGift(
     action: "gift.request",
     entityType: "Gift",
     entityId: gift.id,
-    detail: `Requested ${input.productName} for ${engagement.creator.name}`,
+    detail: `Requested ${name} for ${engagement.creator.name}`,
   });
 
   if (isException) {
@@ -212,15 +232,15 @@ export async function requestGift(
           userId: m.id,
           type: "GIFT_EXCEPTION_REQUESTED",
           title: "Gift exception approval requested",
-          body: `${input.productName} for ${engagement.creator.name}`,
+          body: `${name} for ${engagement.creator.name}`,
           link: `/gifting`,
         }),
       ),
     );
-    return { ok: true, status: GiftStatus.REQUESTED, message: "Exception gift request sent for manager approval.", giftId: gift.id };
+    return { ok: true, status: GIFT_STATUS_KEYS.PENDING_MANAGER, message: "Exception gift request sent for manager approval.", giftId: gift.id };
   }
 
-  return { ok: true, status: GiftStatus.APPROVED_QUEUED, message: "Gift approved and queued for warehouse.", giftId: gift.id };
+  return { ok: true, status: GIFT_STATUS_KEYS.APPROVED, message: "Gift approved and queued for warehouse.", giftId: gift.id };
 }
 
 export async function resolveGiftRequest(
@@ -231,18 +251,25 @@ export async function resolveGiftRequest(
 ): Promise<{ ok: boolean; message: string }> {
   const gift = await prisma.gift.findUnique({
     where: { id: giftId },
-    include: { engagement: { include: { team: true, creator: true } } },
+    include: {
+      status: true,
+      lines: { orderBy: { id: "asc" } },
+      engagement: { include: { team: true, creator: true } },
+    },
   });
   if (!gift) return { ok: false, message: "Gift not found." };
   if (gift.engagement.teamId !== user.teamId) return { ok: false, message: "Not your team's gift." };
   if (!user.permissions.includes("gift.approve")) return { ok: false, message: "No permission to approve gifts." };
-  if (gift.status !== GiftStatus.REQUESTED) return { ok: false, message: "Gift is not pending approval." };
+  if (gift.status.key !== GIFT_STATUS_KEYS.PENDING_MANAGER) return { ok: false, message: "Gift is not pending approval." };
+
+  const name = giftProductName(gift);
 
   if (decision === "approve") {
+    const statusId = await giftStatusId(GIFT_STATUS_KEYS.APPROVED);
     await prisma.gift.update({
       where: { id: giftId },
       data: {
-        status: GiftStatus.APPROVED_QUEUED,
+        statusId,
         approvedById: user.id,
         approvedAt: new Date(),
       },
@@ -252,34 +279,35 @@ export async function resolveGiftRequest(
       kind: "SYSTEM",
       type: "GIFT_APPROVED",
       summary: "Gift exception approved",
-      description: gift.productName,
+      description: name,
       authorId: user.id,
     });
     await notify({
       userId: gift.requestedById,
       type: "GIFT_APPROVED",
       title: "Gift approved",
-      body: `${gift.productName} for ${gift.engagement.creator.name}`,
+      body: `${name} for ${gift.engagement.creator.name}`,
       link: "/gifting",
     });
   } else {
+    const statusId = await giftStatusId(GIFT_STATUS_KEYS.REJECTED);
     await prisma.gift.update({
       where: { id: giftId },
-      data: { status: GiftStatus.REJECTED, exceptionReason: reason },
+      data: { statusId, exceptionReason: reason },
     });
     await logActivity({
       creatorId: gift.engagement.creatorId,
       kind: "SYSTEM",
       type: "GIFT_REJECTED",
       summary: "Gift exception rejected",
-      description: reason ?? gift.productName,
+      description: reason ?? name,
       authorId: user.id,
     });
     await notify({
       userId: gift.requestedById,
       type: "GIFT_REJECTED",
       title: "Gift exception rejected",
-      body: reason ?? gift.productName,
+      body: reason ?? name,
       link: "/gifting",
     });
   }
@@ -289,7 +317,7 @@ export async function resolveGiftRequest(
     action: decision === "approve" ? "gift.approve" : "gift.reject",
     entityType: "Gift",
     entityId: giftId,
-    detail: `Decision ${decision} for ${gift.productName}`,
+    detail: `Decision ${decision} for ${name}`,
   });
 
   return { ok: true, message: decision === "approve" ? "Gift approved." : "Gift rejected." };
@@ -303,17 +331,24 @@ export async function warehouseUpdateGift(
   if (!user.permissions.includes("gift.fulfill")) return { ok: false, message: "No warehouse permission." };
   const gift = await prisma.gift.findUnique({
     where: { id: giftId },
-    include: { engagement: { include: { creator: true } } },
+    include: {
+      status: true,
+      lines: { orderBy: { id: "asc" } },
+      engagement: { include: { creator: true } },
+    },
   });
   if (!gift) return { ok: false, message: "Gift not found." };
 
+  const name = giftProductName(gift);
+
   if (input.action === "dispatch") {
-    if (gift.status !== GiftStatus.APPROVED_QUEUED) return { ok: false, message: "Gift must be approved before dispatch." };
+    if (gift.status.key !== GIFT_STATUS_KEYS.APPROVED) return { ok: false, message: "Gift must be approved before dispatch." };
     if (!input.trackingNumber?.trim()) return { ok: false, message: "Tracking number required." };
+    const statusId = await giftStatusId(GIFT_STATUS_KEYS.SHIPPED);
     await prisma.gift.update({
       where: { id: giftId },
       data: {
-        status: GiftStatus.DISPATCHED,
+        statusId,
         trackingNumber: input.trackingNumber.trim(),
         carrier: input.carrier,
         dispatchedAt: new Date(),
@@ -324,35 +359,36 @@ export async function warehouseUpdateGift(
       kind: "SYSTEM",
       type: "GIFT_DISPATCHED",
       summary: "Gift dispatched",
-      description: `${gift.productName} - tracking ${input.trackingNumber.trim()}`,
+      description: `${name} - tracking ${input.trackingNumber.trim()}`,
       authorId: user.id,
     });
     await notify({
       userId: gift.requestedById,
       type: "GIFT_DISPATCHED",
       title: "Gift dispatched",
-      body: `${gift.productName} - tracking ${input.trackingNumber.trim()}`,
+      body: `${name} - tracking ${input.trackingNumber.trim()}`,
       link: "/gifting",
     });
   } else {
-    if (gift.status !== GiftStatus.DISPATCHED) return { ok: false, message: "Gift must be dispatched before delivery." };
+    if (gift.status.key !== GIFT_STATUS_KEYS.SHIPPED) return { ok: false, message: "Gift must be dispatched before delivery." };
+    const statusId = await giftStatusId(GIFT_STATUS_KEYS.DELIVERED);
     await prisma.gift.update({
       where: { id: giftId },
-      data: { status: GiftStatus.DELIVERED, deliveredAt: new Date() },
+      data: { statusId, deliveredAt: new Date() },
     });
     await logActivity({
       creatorId: gift.engagement.creatorId,
       kind: "SYSTEM",
       type: "GIFT_DELIVERED",
       summary: "Gift delivered",
-      description: gift.productName,
+      description: name,
       authorId: user.id,
     });
     await notify({
       userId: gift.requestedById,
       type: "GIFT_DELIVERED",
       title: "Gift delivered",
-      body: gift.productName,
+      body: name,
       link: "/gifting",
     });
   }
@@ -362,7 +398,7 @@ export async function warehouseUpdateGift(
     action: input.action === "dispatch" ? "gift.dispatch" : "gift.deliver",
     entityType: "Gift",
     entityId: giftId,
-    detail: `${gift.productName} for ${gift.engagement.creator.name}`,
+    detail: `${name} for ${gift.engagement.creator.name}`,
   });
 
   return { ok: true, message: input.action === "dispatch" ? "Gift dispatched." : "Gift marked delivered." };

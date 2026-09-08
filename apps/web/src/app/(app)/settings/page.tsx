@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
-import { BRAND_COLORS, CREATOR_EDITABLE_FIELDS } from "@/lib/constants";
+import { BRAND_COLORS, CREATOR_EDITABLE_FIELDS, GIFT_STATUS_KEYS } from "@/lib/constants";
 
 interface SettingsData {
   name: string;
@@ -707,6 +707,21 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <StagesCard />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Gift statuses</CardTitle>
+          <CardDescription>
+            The lifecycle a gift order passes through. Flags drive behavior: an approval role makes the
+            status a pending-approval step, spawning deliverables writes the agreed content to the
+            engagement, warehouse steps surface in the warehouse queue, and granting credit posts the
+            ledger entry when reached. Core statuses cannot be deleted.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <GiftStatusesCard />
         </CardContent>
       </Card>
 
@@ -1702,4 +1717,243 @@ function StagesCard() {
 
 function cn(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(" ");
+}
+
+interface GiftStatusRow {
+  id: string;
+  key: string;
+  label: string;
+  position: number;
+  approvalRole: "NONE" | "MANAGER" | "ADMIN";
+  isDraft: boolean;
+  isRejection: boolean;
+  grantCredit: boolean;
+  spawnDeliverables: boolean;
+  warehouseStep: boolean;
+}
+
+const PROTECTED_GIFT_KEYS = new Set<string>(Object.values(GIFT_STATUS_KEYS));
+
+const GIFT_FLAG_LABELS: { field: keyof Omit<GiftStatusRow, "id" | "key" | "label" | "position" | "approvalRole">; label: string }[] = [
+  { field: "isDraft", label: "Draft" },
+  { field: "isRejection", label: "Rejection" },
+  { field: "spawnDeliverables", label: "Writes deliverables" },
+  { field: "warehouseStep", label: "Warehouse step" },
+  { field: "grantCredit", label: "Grants credit" },
+];
+
+function GiftStatusesCard() {
+  const [statuses, setStatuses] = React.useState<GiftStatusRow[]>([]);
+  const [newLabel, setNewLabel] = React.useState("");
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameValue, setRenameValue] = React.useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(async () => {
+    const res = await fetch("/api/settings/gift-statuses");
+    if (!res.ok) return;
+    const j = await res.json();
+    setStatuses(j.statuses ?? []);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const run = async (method: string, body: unknown): Promise<boolean> => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/settings/gift-statuses", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        toast({ title: j.error ?? "Could not update gift statuses", variant: "destructive" });
+        return false;
+      }
+      await load();
+      return true;
+    } catch {
+      toast({ title: "Could not update gift statuses", variant: "destructive" });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = async () => {
+    const label = newLabel.trim();
+    if (!label || busy) return;
+    const ok = await run("POST", { label });
+    if (ok) {
+      setNewLabel("");
+      toast({ title: `Gift status "${label}" added` });
+    }
+  };
+
+  const rename = async () => {
+    if (!renamingId || !renameValue.trim() || busy) return;
+    const ok = await run("PATCH", { action: "rename", id: renamingId, label: renameValue.trim() });
+    if (ok) {
+      setRenamingId(null);
+      toast({ title: "Gift status renamed" });
+    }
+  };
+
+  const remove = async () => {
+    if (!confirmDeleteId || busy) return;
+    const res = await fetch(`/api/settings/gift-statuses?id=${confirmDeleteId}`, { method: "DELETE" });
+    const j = await res.json();
+    if (!res.ok) {
+      toast({ title: j.error ?? "Could not delete gift status", variant: "destructive" });
+      setConfirmDeleteId(null);
+      return;
+    }
+    setConfirmDeleteId(null);
+    toast({ title: "Gift status deleted" });
+    await load();
+  };
+
+  const setFlag = (s: GiftStatusRow, field: keyof GiftStatusRow, value: boolean | string) => {
+    void run("PATCH", { action: "update", id: s.id, [field]: value });
+  };
+
+  return (
+    <div className="space-y-4 pt-4">
+      {confirmDeleteId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Delete this gift status?</CardTitle>
+              <CardDescription>
+                Gifts currently in this status must be moved first. Core statuses cannot be deleted.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={() => void remove()}>
+                Delete
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      <div className="space-y-2">
+        {statuses.map((s, i) => {
+          const renaming = renamingId === s.id;
+          const protectedKey = PROTECTED_GIFT_KEYS.has(s.key);
+          return (
+            <div key={s.id} className="rounded-lg border border-border bg-card p-2">
+              <div className="flex items-center gap-2">
+                {renaming ? (
+                  <>
+                    <Input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && void rename()}
+                      className="flex-1"
+                      autoFocus
+                    />
+                    <Button size="sm" variant="default" onClick={() => void rename()} disabled={busy}>
+                      <Save className="mr-1 h-4 w-4" /> Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setRenamingId(null)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-xs text-muted-foreground">
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="truncate text-sm font-medium">{s.label}</span>{" "}
+                      <span className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        {s.key}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-0.5">
+                      <Button size="sm" variant="ghost" disabled={i === 0 || busy} onClick={() => void run("PATCH", { action: "move", id: s.id, dir: -1 })}>
+                        <ArrowUp className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={i === statuses.length - 1 || busy} onClick={() => void run("PATCH", { action: "move", id: s.id, dir: 1 })}>
+                        <ArrowDown className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setRenamingId(s.id); setRenameValue(s.label); }}>
+                        <Pencil className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                      {!protectedKey ? (
+                        <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDeleteId(s.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Approval</Label>
+                  <Select
+                    value={s.approvalRole}
+                    onValueChange={(v) => setFlag(s, "approvalRole", v)}
+                    disabled={busy}
+                  >
+                    <SelectTrigger className="h-7 w-auto min-w-[7rem] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">None</SelectItem>
+                      <SelectItem value="MANAGER">Team manager</SelectItem>
+                      <SelectItem value="ADMIN">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {GIFT_FLAG_LABELS.map((f) => (
+                  <button
+                    key={f.field}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setFlag(s, f.field, !s[f.field])}
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
+                      s[f.field]
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-muted-foreground/40",
+                    )}
+                  >
+                    {s[f.field] ? "✓ " : ""}
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {statuses.length === 0 ? (
+          <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+            No gift statuses yet — add the first one below.
+          </p>
+        ) : null}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          placeholder="New status label (e.g. On hold)"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void add()}
+        />
+        <Button onClick={() => void add()} disabled={busy || !newLabel.trim()}>
+          <Plus className="mr-1 h-4 w-4" /> Add status
+        </Button>
+      </div>
+    </div>
+  );
 }

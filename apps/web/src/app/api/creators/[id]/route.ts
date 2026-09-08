@@ -24,7 +24,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           stage: true,
           team: true,
           deliverables: { orderBy: { createdAt: "asc" } },
-          gifts: { orderBy: { requestedAt: "desc" } },
+          gifts: {
+            include: { status: true, lines: { orderBy: { id: "asc" } } },
+            orderBy: { requestedAt: "desc" },
+          },
         },
         orderBy: { createdAt: "desc" },
       },
@@ -59,9 +62,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // never another team's deal, deliverable or gifting details.
   const canViewFull = sameTeam || owns || !otherTeamOnly;
 
-  const redactedEngagements = creator.engagements.map((e) =>
-    canViewFull ? e : { ...e, deliverables: [], gifts: [] },
-  );
+  const redactedEngagements = creator.engagements.map((e) => {
+    // Gift serialization: expose the status key and a display product name
+    // (snapshotted first order line), since the old scalar fields are gone.
+    const gifts = canViewFull
+      ? e.gifts.map((g) => ({
+          ...g,
+          status: g.status.key,
+          statusLabel: g.status.label,
+          productName: g.lines[0]?.productName ?? `${creator.name} gift`,
+          productDescription: g.lines[0]?.productDescription,
+        }))
+      : [];
+    return canViewFull ? { ...e, gifts } : { ...e, deliverables: [], gifts };
+  });
 
   let poolStatus: "none" | "same_team" | "company" = "none";
   const lastActivity = creator.activityLogs[0]?.loggedAt;

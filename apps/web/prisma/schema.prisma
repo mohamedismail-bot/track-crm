@@ -42,12 +42,15 @@ enum DeliverableStatus {
   REVISION_REQUESTED
 }
 
-enum GiftStatus {
-  REQUESTED
-  APPROVED_QUEUED
-  DISPATCHED
-  DELIVERED
-  REJECTED
+enum GiftApprovalRole {
+  NONE
+  MANAGER
+  ADMIN
+}
+
+enum CreditTransactionType {
+  CREDIT
+  DEBIT
 }
 
 enum ActivityKind {
@@ -142,6 +145,7 @@ model User {
   reviewedDeliverables  Deliverable[]        @relation("DeliverableReviewer")
   requestedGifts        Gift[]               @relation("GiftRequester")
   approvedGifts         Gift[]               @relation("GiftApprover")
+  creditAccount         CreditAccount? 
   createdEngagements    Engagement[]         @relation("EngagementCreator")
   createdCreators       Creator[]            @relation("CreatorCreator")
   reviewedCreators      Creator[]            @relation("CreatorReviewer")
@@ -194,6 +198,33 @@ model TransactionLog {
   @@index([userId, createdAt])
 }
 
+model CreditAccount {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions CreditTransaction[]
+
+  @@index([userId])
+}
+
+model CreditTransaction {
+  id        String                @id @default(cuid())
+  accountId String
+  amount    Float
+  type      CreditTransactionType
+  reason    String
+  refType   String
+  refId     String
+  createdAt DateTime              @default(now())
+
+  account CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+}
+
 // ---------------------------------------------------------------------------
 // Reference data (admin-managed)
 // ---------------------------------------------------------------------------
@@ -244,6 +275,36 @@ model CreatorField {
   updatedAt DateTime @updatedAt
 
   @@index([order])
+}
+
+// ---------------------------------------------------------------------------
+// Product catalog
+// ---------------------------------------------------------------------------
+
+model ProductCategory {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  products Product[]
+
+  @@index([position])
+}
+
+model Product {
+  id         String   @id @default(cuid())
+  name       String
+  categoryId String
+  unitCost   Float
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  category  ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  giftLines GiftLine[]
+
+  @@index([categoryId])
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +425,29 @@ model PipelineConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Gift statuses (admin-managed workflow rows, cloned from the Stages pattern;
+// transitions never hardcode status names — behavior comes from flags)
+// ---------------------------------------------------------------------------
+
+model GiftStatus {
+  id                String           @id @default(cuid())
+  key               String           @unique
+  label             String
+  position          Int              @default(0)
+  approvalRole      GiftApprovalRole @default(NONE)
+  isDraft           Boolean          @default(false)
+  isRejection       Boolean          @default(false)
+  grantCredit       Boolean          @default(false)
+  spawnDeliverables Boolean          @default(false)
+  warehouseStep     Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+
+  gifts Gift[]
+
+  @@index([position])
+}
+
+// ---------------------------------------------------------------------------
 // Engagements, Deliverables, Gifts
 // ---------------------------------------------------------------------------
 
@@ -399,6 +483,7 @@ model Engagement {
 model Deliverable {
   id            String   @id @default(cuid())
   engagementId  String
+  giftId        String?
   title         String
   type          String
   dueDate       DateTime
@@ -413,37 +498,64 @@ model Deliverable {
   updatedAt     DateTime @updatedAt
 
   engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  gift       Gift?      @relation(fields: [giftId], references: [id], onDelete: SetNull)
   submittedBy User?     @relation("DeliverableSubmitter", fields: [submittedById], references: [id])
   reviewedBy  User?     @relation("DeliverableReviewer", fields: [reviewedById], references: [id])
 
   @@index([engagementId])
   @@index([status])
+  @@index([giftId])
 }
 
 model Gift {
   id              String    @id @default(cuid())
+  orderNumber     Int       @unique @default(autoincrement())
   engagementId    String
-  productName     String
-  productDescription String?
+  statusId        String
   requestedById   String
   requestedAt     DateTime  @default(now())
   isException     Boolean   @default(false)
   exceptionReason String?
-  status          GiftStatus @default(REQUESTED)
   approvedById    String?
   approvedAt      DateTime?
   trackingNumber  String?
   carrier         String?
   dispatchedAt    DateTime?
   deliveredAt     DateTime?
+  shippingAddress String?
+  orderTotal      Float     @default(0)
+  currency        Currency  @default(EGP)
+  agreedBudget    Float?
+  commissionRate  Float?
+  couponCode      String?
   createdAt       DateTime  @default(now())
 
+  status     GiftStatus @relation(fields: [statusId], references: [id], onDelete: Restrict)
   engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
   requestedBy User      @relation("GiftRequester", fields: [requestedById], references: [id])
   approvedBy  User?     @relation("GiftApprover", fields: [approvedById], references: [id])
 
+  lines        GiftLine[]
+  deliverables Deliverable[]
+
   @@index([engagementId])
-  @@index([status, requestedAt])
+  @@index([statusId, requestedAt])
+}
+
+model GiftLine {
+  id            String  @id @default(cuid())
+  giftId        String
+  productId     String?
+  productName   String
+  productDescription String?
+  unitCost      Float   @default(0)
+  quantity      Int     @default(1)
+  lineTotal     Float   @default(0)
+
+  gift    Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([giftId])
 }
 
 // ---------------------------------------------------------------------------

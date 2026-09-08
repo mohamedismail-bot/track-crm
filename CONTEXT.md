@@ -76,7 +76,17 @@ A named position in the outreach pipeline (e.g., Prospecting, Negotiation, Agree
 The ordered set of **Stages** that an **Engagement** passes through, as configured for a **Team**. Each **Team** has its own **Pipeline** view of the **Creators** it works.
 
 **Gift**:
-A product item sent to a **Creator** as part of an **Engagement**. A **Creator** may receive at most one **Gift** per calendar month across all **Engagements**; a second one in the same month may be **Requested** as an exception pending **Team Manager** approval. A **Gift** under a **Commission** or **Barter** engagement requires a **video** deliverable to be fulfilled; a **Gift** under a **Fixed Budget** engagement requires the agreed campaign deliverables. No new **Gift** may be requested for a **Creator** until the deliverables required by the previous **Gift** are marked as received — a hard stop with no override.
+A **Gift Order** — the full lifecycle of sending product to a **Creator** as part of an **Engagement**: product lines, shipping destination, approval, warehouse dispatch, and the agreed content expected in return. A **Creator** may receive at most one **Gift** per calendar month across all **Engagements**; a second one in the same month may be **Requested** as an exception pending approval. No new **Gift** may be requested for a **Creator** until the deliverables required by the previous **Gift** are marked as received — a hard stop with no override. The current simple gift request is fully replaced by this lifecycle.
+
+**Product**:
+An item in the **Product Catalog** that can be sent in a **Gift**. A **Product** belongs to exactly one **Product Category** and carries a fixed unit cost (the cost to the company), administered exclusively by the **Admin**. The unit cost is read-only to all other roles and is snapped into the **Gift**'s order line at request time, so later catalog edits never change historical **Gifts**.
+
+**Product Category**:
+A grouping of **Products** in the **Product Catalog** (e.g., Skincare, Devices, Apparel), created and maintained by the **Admin**.
+
+**Credit Account**:
+A per-**User** ledger of that **User**'s gifting spend on **Gifts**. Each **Gift Order** posts two transactions: a **credit** equal to the order total when the **Gift** reaches a status flagged to grant credit (by default `Delivered`), and a single **debit** of the same amount when **all** of that order's required **Deliverables** are **Approved** (triggered by the final approval; posted once; direct when the workspace's approval requirement is off). No penalty is ever charged; an overdue **Deliverable** is only a warning. The running balance is the value of the **User**'s delivered-but-yet-unfulfilled **Gifts**.
+_Avoid_: budget, allowance, spending cap
 
 **Workspace Settings**:
 Configurable workspace-level rules controlled by the **Admin**, including the brand identity (workspace **name**, an attached/uploaded **logo file** — not a URL — and an **accent color** from a preset palette applied across the app and login screen), dynamic **Team** management (create/rename/delete), the **Ownership Policy**, the **Inactivity Threshold**, the one-**Gift**-per-month limit, the minimum **Stage** for sending a **Gift**, and the requirement that an approved **Deliverable** with a recorded posted video/link is needed before the next **Gift** may be requested.
@@ -104,6 +114,12 @@ _Avoid_: Category, segment
 **Custom Field**:
 An additional, **Admin**-configured attribute that may be attached to a **Creator** beyond the built-in fields. Each **Custom Field** has a label, a data type, and an optional required flag. Values are entered on the **Creator** record and can be filtered on.
 _Avoid_: Extra field, dynamic attribute
+
+**Agreement**:
+A section of the **Gift Order** form (after the **Engagement** picker) capturing the deal's terms for that **Gift**: for a **Fixed Budget** engagement the agreed budget, or for a **Commission** engagement the commission rate (and coupon code), together with the **Deliverables** (title, type, due date) agreed in exchange for the **Gift**. The **Deliverables** it defines are written to real **Deliverable** records on the **Engagement** as soon as the **Gift** is **Approved**, and each is then worked and statused through the normal delivery flow.
+
+**Shipping Address**:
+The destination where a **Gift Order** is sent. Chosen on the order form from the **Creator**'s previously-used addresses or typed new; the chosen value is snapshotted onto the **Gift** and printed on the warehouse shipping label alongside the **Creator**'s name, phone, and **City**.
 
 **Required for Gifting**:
 The set of **Creator** fields that must be populated before a **Gift** may be **Requested** for that **Creator**: **Country**, **City**, **Creator Type**, and **Phone**. A **Creator** missing any of these is flagged with an **Incomplete Data** indicator visible to its **Owner** (badge on the card and list row, callout on the profile), and the **Gift** request is a hard stop naming the missing fields.

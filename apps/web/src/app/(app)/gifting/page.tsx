@@ -33,6 +33,8 @@ interface QueueGift {
   productName: string;
   productDescription: string | null;
   status: string;
+  statusLabel?: string;
+  group?: "pending" | "warehouse" | "history";
   isException: boolean;
   exceptionReason: string | null;
   trackingNumber: string | null;
@@ -83,10 +85,9 @@ export default function GiftingPage() {
     load();
   }, [load]);
 
-  const pending = gifts.filter((g) => g.status === "REQUESTED");
-  const queued = gifts.filter((g) => g.status === "APPROVED_QUEUED");
-  const dispatched = gifts.filter((g) => g.status === "DISPATCHED");
-  const delivered = gifts.filter((g) => g.status === "DELIVERED" || g.status === "REJECTED");
+  const pending = gifts.filter((g) => g.group === "pending");
+  const queued = gifts.filter((g) => g.group === "warehouse");
+  const delivered = gifts.filter((g) => g.group === "history");
 
   const patch = async (id: string, body: Record<string, unknown>) => {
     try {
@@ -124,7 +125,7 @@ export default function GiftingPage() {
               <Badge variant="secondary" className="ml-1.5">{pending.length}</Badge>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger value="warehouse">Warehouse ({queued.length + dispatched.length})</TabsTrigger>
+          <TabsTrigger value="warehouse">Warehouse ({queued.length})</TabsTrigger>
           <TabsTrigger value="history">History ({delivered.length})</TabsTrigger>
         </TabsList>
 
@@ -197,10 +198,10 @@ export default function GiftingPage() {
           </p>
           {loading ? (
             <Skeleton className="h-40 w-full" />
-          ) : queued.length + dispatched.length === 0 ? (
+          ) : queued.length === 0 ? (
             <EmptyState text="No gifts in the warehouse queue." />
           ) : (
-            [...queued, ...dispatched].map((g) => (
+            queued.map((g) => (
               <DispatchCard
                 key={g.id}
                 gift={g}
@@ -256,7 +257,7 @@ function DispatchCard({
 }) {
   const [tracking, setTracking] = React.useState(gift.trackingNumber ?? "");
   const [carrier, setCarrier] = React.useState(gift.carrier ?? "");
-  const dispatched = gift.status === "DISPATCHED";
+  const dispatched = gift.trackingNumber != null;
 
   return (
     <Card key={gift.id}>
