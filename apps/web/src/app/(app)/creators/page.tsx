@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown, RotateCcw, X } from "lucide-react";
+import { Grid2X2, Table2, KanbanSquare, Plus, Search, Upload, SlidersHorizontal, Check, ArrowUpDown, RotateCcw, X, Layers, ShieldAlert } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MultiSelect } from "@/components/ui/multi-select";
+import { toast } from "@/components/ui/toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { CreatorCard, type CreatorListItem } from "@/components/creators/creator-card";
@@ -21,15 +30,24 @@ import { CreatorsTable } from "@/components/creators/creators-table";
 import { KanbanBoard, type KanbanStage } from "@/components/creators/kanban-board";
 import { CreatorFormDialog } from "@/components/creators/creator-form";
 import { ImportCreatorsDialog } from "@/components/creators/creator-import";
+import { groupCreators, GROUP_BY_OPTIONS, type GroupByKey } from "@/lib/grouping";
 
 type View = "card" | "table" | "kanban";
 
 function GroupedCreatorCards({
   creators,
   groupBy,
+  onStageChanged,
+  selectedIds,
+  onToggleSelect,
+  onReassigned,
 }: {
   creators: CreatorListItem[];
-  groupBy: "none" | "stage" | "owner" | "team";
+  groupBy: GroupByKey;
+  onStageChanged?: (id: string, stage: { id: string; name: string } | null) => void;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
+  onReassigned?: () => void;
 }) {
   if (creators.length === 0) {
     return (
@@ -39,44 +57,35 @@ function GroupedCreatorCards({
     );
   }
 
-  if (groupBy === "none") {
-    return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {creators.map((c) => (
-          <CreatorCard key={c.id} creator={c} />
-        ))}
-      </div>
-    );
-  }
+  const renderGrid = (items: CreatorListItem[]) => (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {items.map((c) => (
+        <CreatorCard
+          key={c.id}
+          creator={c}
+          onStageChanged={onStageChanged}
+          selected={selectedIds?.has(c.id)}
+          onToggleSelect={onToggleSelect}
+          onReassigned={onReassigned}
+        />
+      ))}
+    </div>
+  );
 
-  const groups = new Map<string, CreatorListItem[]>();
-  const groupOrder: string[] = [];
-  for (const c of creators) {
-    let label: string;
-    if (groupBy === "stage") label = c.stage?.name ?? "No stage";
-    else if (groupBy === "owner") label = c.owners[0] ? `${c.owners[0].name} · ${c.owners[0].teamName}` : "Unassigned";
-    else label = c.teams[0]?.name ?? "No team";
-    if (!groups.has(label)) groupOrder.push(label);
-    const arr = groups.get(label) ?? [];
-    arr.push(c);
-    groups.set(label, arr);
-  }
+  if (groupBy === "none") return renderGrid(creators);
 
+  const groups = groupCreators(creators, groupBy);
   return (
     <div className="space-y-6">
-      {groupOrder.map((label) => (
-        <section key={label}>
+      {groups.map((g) => (
+        <section key={g.label}>
           <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-            {label}
+            {g.label}
             <span className="rounded-full border px-2 py-0.5 text-xs font-normal">
-              {(groups.get(label) ?? []).length}
+              {g.items.length}
             </span>
           </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {(groups.get(label) ?? []).map((c) => (
-              <CreatorCard key={c.id} creator={c} />
-            ))}
-          </div>
+          {renderGrid(g.items)}
         </section>
       ))}
     </div>
@@ -100,7 +109,7 @@ interface ReferenceData {
 export default function CreatorsPage() {
   const params = useSearchParams();
   const [view, setView] = React.useState<View>("card");
-  const [groupBy, setGroupBy] = React.useState<"none" | "stage" | "owner" | "team">("none");
+  const [groupBy, setGroupBy] = React.useState<GroupByKey>("none");
   const [creators, setCreators] = React.useState<CreatorListItem[]>([]);
   const [stages, setStages] = React.useState<KanbanStage[]>([]);
   const [teams, setTeams] = React.useState<FilterOption[]>([
@@ -120,6 +129,11 @@ export default function CreatorsPage() {
     gender: "all-gender",
     shopify: "all-shopify",
     niche: "all-niche",
+    country: "all-country",
+    city: "all-city",
+    creatorType: "all-type",
+    createdFrom: "",
+    createdTo: "",
     pending: params.get("pending") === "1",
     incomplete: params.get("incomplete") === "1",
     overdue: params.get("overdue") === "1",
@@ -133,11 +147,19 @@ export default function CreatorsPage() {
     roleSlug: string;
     canCreate: boolean;
     canExport: boolean;
+    canBulkEdit: boolean;
   } | null>(null);
   const [refData, setRefData] = React.useState<ReferenceData | null>(null);
   const [debouncedQ, setDebouncedQ] = React.useState("");
   const [importOpen, setImportOpen] = React.useState(false);
   const [exporting, setExporting] = React.useState(false);
+  const [owners, setOwners] = React.useState<FilterOption[]>([]);
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [bulkStageId, setBulkStageId] = React.useState("");
+  const [bulkOwners, setBulkOwners] = React.useState<string[]>([]);
+  const [bulkShopify, setBulkShopify] = React.useState("");
+  const [bulkBusy, setBulkBusy] = React.useState(false);
 
   React.useEffect(() => {
     fetch("/api/me")
@@ -193,8 +215,7 @@ export default function CreatorsPage() {
     return () => clearTimeout(t);
   }, [filters.q]);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
+  const buildParams = React.useCallback(() => {
     const params = new URLSearchParams();
     if (debouncedQ) params.set("q", debouncedQ);
     if (filters.team && filters.team !== "all-team") params.set("team", filters.team);
@@ -206,10 +227,21 @@ export default function CreatorsPage() {
     if (filters.gender && filters.gender !== "all-gender") params.set("gender", filters.gender);
     if (filters.shopify && filters.shopify !== "all-shopify") params.set("shopify", filters.shopify);
     if (filters.niche && filters.niche !== "all-niche") params.set("niche", filters.niche);
+    if (filters.country && filters.country !== "all-country") params.set("country", filters.country);
+    if (filters.city && filters.city !== "all-city") params.set("city", filters.city);
+    if (filters.creatorType && filters.creatorType !== "all-type") params.set("creatorType", filters.creatorType);
+    if (filters.createdFrom) params.set("createdFrom", filters.createdFrom);
+    if (filters.createdTo) params.set("createdTo", filters.createdTo);
     if (filters.pending) params.set("pending", "1");
     if (filters.incomplete) params.set("incomplete", "1");
     if (filters.overdue) params.set("overdue", "1");
     if (filters.upcoming) params.set("upcoming", "1");
+    return params;
+  }, [debouncedQ, filters, sort]);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    const params = buildParams();
     try {
       const res = await fetch(`/api/creators?${params}`);
       if (!res.ok) return;
@@ -220,27 +252,13 @@ export default function CreatorsPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedQ, filters, sort]);
+  }, [buildParams]);
 
   const exportCsv = React.useCallback(async () => {
     if (exporting) return;
     setExporting(true);
     try {
-      const params = new URLSearchParams();
-      if (debouncedQ) params.set("q", debouncedQ);
-      if (filters.team && filters.team !== "all-team") params.set("team", filters.team);
-      if (filters.stage && filters.stage !== "all-stage") params.set("stage", filters.stage);
-      if (filters.platform) params.set("platform", filters.platform);
-      if (filters.pool && filters.pool !== "all-pool") params.set("pool", filters.pool);
-      if (filters.owner) params.set("owner", filters.owner);
-      if (sort && sort !== "latest") params.set("sort", sort);
-      if (filters.gender && filters.gender !== "all-gender") params.set("gender", filters.gender);
-      if (filters.shopify && filters.shopify !== "all-shopify") params.set("shopify", filters.shopify);
-      if (filters.niche && filters.niche !== "all-niche") params.set("niche", filters.niche);
-      if (filters.pending) params.set("pending", "1");
-      if (filters.incomplete) params.set("incomplete", "1");
-      if (filters.overdue) params.set("overdue", "1");
-      if (filters.upcoming) params.set("upcoming", "1");
+      const params = buildParams();
       const res = await fetch(`/api/creators/export?${params}`);
       if (!res.ok) {
         const err = await res.json().catch(() => null);
@@ -264,7 +282,7 @@ export default function CreatorsPage() {
     } finally {
       setExporting(false);
     }
-  }, [debouncedQ, filters, sort, exporting]);
+  }, [buildParams, exporting]);
 
   React.useEffect(() => {
     load();
@@ -279,6 +297,7 @@ export default function CreatorsPage() {
           ...(d.teams ?? []).map((t: { id: string; name: string }) => ({ value: t.id, label: t.name })),
         ].filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
         setTeams(teamOptions);
+        setOwners((d.owners ?? []).map((o: { id: string; displayName: string }) => ({ value: o.id, label: o.displayName })));
       })
       .catch(() => {});
   }, [load]);
@@ -286,6 +305,18 @@ export default function CreatorsPage() {
   const activeTrigger = (active: boolean) =>
     active ? "border-primary/60 bg-primary/5 font-medium text-primary" : "";
   const smartCount = [filters.incomplete, filters.overdue, filters.upcoming, filters.pending].filter(Boolean).length;
+  const secondaryCount = [
+    !!filters.owner,
+    filters.country !== "all-country",
+    filters.city !== "all-city",
+    filters.creatorType !== "all-type",
+    filters.gender !== "all-gender",
+    filters.shopify !== "all-shopify",
+    filters.niche !== "all-niche",
+    !!filters.createdFrom,
+    !!filters.createdTo,
+  ].filter(Boolean).length;
+  const filtersActive = smartCount + secondaryCount;
 
   const SORT_OPTIONS: { value: string; label: string }[] = [
     { value: "latest", label: "Recently updated" },
@@ -295,6 +326,53 @@ export default function CreatorsPage() {
     { value: "created-desc", label: "Newest added" },
     { value: "created-asc", label: "Oldest added" },
   ];
+
+  const toggleSelect = (id: string, selected?: boolean) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected === true) next.add(id);
+      else if (selected === false) next.delete(id);
+      else if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleSelectAll = () =>
+    setSelectedIds((prev) =>
+      prev.size === creators.length && creators.length > 0
+        ? new Set()
+        : new Set(creators.map((c) => c.id)),
+    );
+
+  const applyBulk = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkBusy(true);
+    try {
+      const body: Record<string, unknown> = { ids: [...selectedIds] };
+      if (bulkStageId) body.stageId = bulkStageId;
+      if (bulkShopify === "yes") body.shopifyRegistered = true;
+      else if (bulkShopify === "no") body.shopifyRegistered = false;
+      if (bulkOwners.length > 0) body.ownerIds = bulkOwners;
+      const res = await fetch("/api/creators/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) return toast({ title: data.error ?? "Bulk edit failed", variant: "destructive" });
+      toast({ title: "Updated", description: `${data.total} creators updated` });
+      setBulkOpen(false);
+      setBulkStageId("");
+      setBulkOwners([]);
+      setBulkShopify("");
+      setSelectedIds(new Set());
+      load();
+    } catch {
+      toast({ title: "Bulk edit failed", variant: "destructive" });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -368,7 +446,7 @@ export default function CreatorsPage() {
             Assigned to me
           </button>
         </div>
-        {(filters.q || filters.team !== "all-team" || filters.stage !== "all-stage" || filters.platform !== "all-platform" || filters.pool !== "all-pool" || filters.owner || filters.gender !== "all-gender" || filters.shopify !== "all-shopify" || filters.niche !== "all-niche" || filters.pending || filters.incomplete || filters.overdue || filters.upcoming || filters.myAssigned || sort !== "latest") ? (
+        {(filters.q || filters.team !== "all-team" || filters.stage !== "all-stage" || filters.platform !== "all-platform" || filters.pool !== "all-pool" || filters.owner || filters.gender !== "all-gender" || filters.shopify !== "all-shopify" || filters.niche !== "all-niche" || filters.country !== "all-country" || filters.city !== "all-city" || filters.creatorType !== "all-type" || filters.createdFrom || filters.createdTo || filters.pending || filters.incomplete || filters.overdue || filters.upcoming || filters.myAssigned || sort !== "latest") ? (
           <Button
             variant="ghost"
             size="sm"
@@ -384,6 +462,11 @@ export default function CreatorsPage() {
                 gender: "all-gender",
                 shopify: "all-shopify",
                 niche: "all-niche",
+                country: "all-country",
+                city: "all-city",
+                creatorType: "all-type",
+                createdFrom: "",
+                createdTo: "",
                 pending: false,
                 incomplete: false,
                 overdue: false,
@@ -453,60 +536,15 @@ export default function CreatorsPage() {
             <SelectItem value="company">Company pool</SelectItem>
           </SelectContent>
         </Select>
-        <Select
-          value={filters.gender}
-          onValueChange={(v) => setFilters((f) => ({ ...f, gender: v }))}
-        >
-          <SelectTrigger className={cn("w-36", activeTrigger(filters.gender !== "all-gender"))}>
-            <SelectValue placeholder="All genders" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all-gender">All genders</SelectItem>
-            {(refData?.genderOptions ?? []).map((g) => (
-              <SelectItem key={g} value={g}>
-                {g}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={filters.shopify}
-          onValueChange={(v) => setFilters((f) => ({ ...f, shopify: v }))}
-        >
-          <SelectTrigger className={cn("w-36", activeTrigger(filters.shopify !== "all-shopify"))}>
-            <SelectValue placeholder="Shopify" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all-shopify">Any Shopify</SelectItem>
-            <SelectItem value="yes">Shopify registered</SelectItem>
-            <SelectItem value="no">Not registered</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={filters.niche}
-          onValueChange={(v) => setFilters((f) => ({ ...f, niche: v }))}
-        >
-          <SelectTrigger className={cn("w-40", activeTrigger(filters.niche !== "all-niche"))}>
-            <SelectValue placeholder="All niches" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all-niche">All niches</SelectItem>
-            {(refData?.nicheOptions ?? []).map((n) => (
-              <SelectItem key={n} value={n}>
-                {n}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Popover.Root>
           <Popover.Trigger asChild>
             <Button
-              variant={smartCount ? "secondary" : "outline"}
+              variant={filtersActive ? "secondary" : "outline"}
               size="sm"
-              className={smartCount ? "gap-1.5 border-primary/50 bg-primary/5 text-primary" : "gap-1.5"}
+              className={filtersActive ? "gap-1.5 border-primary/50 bg-primary/5 text-primary" : "gap-1.5"}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
-              Smart filters{smartCount ? ` (${smartCount})` : ""}
+              Filters{filtersActive ? ` (${filtersActive})` : ""}
             </Button>
           </Popover.Trigger>
           <Popover.Portal>
@@ -514,10 +552,153 @@ export default function CreatorsPage() {
               align="start"
               sideOffset={4}
               onOpenAutoFocus={(e) => e.preventDefault()}
-              className="z-50 w-60 rounded-md border bg-popover p-1.5 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+              className="z-50 max-h-[80vh] w-72 overflow-y-auto rounded-md border bg-popover p-2 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
             >
-              <p className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Smart filters
+              <p className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Filters
+              </p>
+
+              <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Assignment
+              </p>
+              <Select value={filters.owner} onValueChange={(v) => setFilters((f) => ({ ...f, owner: v, myAssigned: false }))}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="All owners" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All owners</SelectItem>
+                  {owners.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Location
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Select
+                  value={filters.country}
+                  onValueChange={(v) => {
+                    setFilters((f) => ({
+                      ...f,
+                      country: v,
+                      city: v === "all-country" ? "all-city" : (filters.city),
+                    }));
+                    if (v !== "all-country" && filters.city !== "all-city") {
+                      const hasCity = (refData?.countries ?? [])
+                        .find((c) => c.id === v)?.cities.some((c) => c.id === filters.city);
+                      if (!hasCity) setFilters((f) => ({ ...f, city: "all-city" }));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Any country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-country">Any country</SelectItem>
+                    {(refData?.countries ?? []).map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={filters.city}
+                  onValueChange={(v) => setFilters((f) => ({ ...f, city: v }))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Any city" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-city">Any city</SelectItem>
+                    {(refData?.countries ?? []).find((c) => c.id === filters.country)?.cities.map((ct) => (
+                      <SelectItem key={ct.id} value={ct.id}>
+                        {ct.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Classification
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Select value={filters.creatorType} onValueChange={(v) => setFilters((f) => ({ ...f, creatorType: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Any type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-type">Any type</SelectItem>
+                    {(refData?.creatorTypes ?? []).map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filters.gender} onValueChange={(v) => setFilters((f) => ({ ...f, gender: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Any gender" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-gender">Any gender</SelectItem>
+                    {(refData?.genderOptions ?? []).map((g) => (
+                      <SelectItem key={g} value={g}>
+                        {g}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={filters.shopify} onValueChange={(v) => setFilters((f) => ({ ...f, shopify: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Any Shopify" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-shopify">Any Shopify</SelectItem>
+                    <SelectItem value="yes">Shopify registered</SelectItem>
+                    <SelectItem value="no">Not registered</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filters.niche} onValueChange={(v) => setFilters((f) => ({ ...f, niche: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Any niche" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-niche">Any niche</SelectItem>
+                    {(refData?.nicheOptions ?? []).map((n) => (
+                      <SelectItem key={n} value={n}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Created
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Input
+                  type="date"
+                  value={filters.createdFrom}
+                  onChange={(e) => setFilters((f) => ({ ...f, createdFrom: e.target.value }))}
+                  aria-label="Created from"
+                />
+                <Input
+                  type="date"
+                  value={filters.createdTo}
+                  onChange={(e) => setFilters((f) => ({ ...f, createdTo: e.target.value }))}
+                  aria-label="Created to"
+                />
+              </div>
+
+              <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Status
               </p>
               {(
                 [
@@ -556,35 +737,42 @@ export default function CreatorsPage() {
       {/* View toolbar: which view + how it is arranged */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Tabs
-            value={view}
-            onValueChange={(v) => setView(v as View)}
-          >
-            <TabsList>
-              <TabsTrigger value="card">
-                <Grid2X2 className="mr-1 h-4 w-4" data-lucide="grid2x2" /> Cards
-              </TabsTrigger>
-              <TabsTrigger value="table">
-                <Table2 className="mr-1 h-4 w-4" data-lucide="table2" /> Table
-              </TabsTrigger>
-              <TabsTrigger value="kanban">
-                <KanbanSquare className="mr-1 h-4 w-4" data-lucide="kanban-square" /> Board
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {view === "card" ? (
-            <Select value={groupBy} onValueChange={(v) => setGroupBy(v as "none" | "stage" | "owner" | "team")}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Group by" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No grouping</SelectItem>
-                <SelectItem value="stage">Group by stage</SelectItem>
-                <SelectItem value="owner">Group by owner</SelectItem>
-                <SelectItem value="team">Group by team</SelectItem>
-              </SelectContent>
-            </Select>
-          ) : null}
+          <div className="inline-flex items-center gap-0.5 rounded-lg border border-border/70 bg-muted/40 p-0.5">
+            {[
+              { key: "card" as View, label: "Cards", icon: Grid2X2, aria: "grid2x2" },
+              { key: "table" as View, label: "Table", icon: Table2, aria: "table2" },
+              { key: "kanban" as View, label: "Board", icon: KanbanSquare, aria: "kanban-square" },
+            ].map(({ key, label, icon: Icon, aria }) => (
+              <button
+                key={key}
+                type="button"
+                aria-label={`View ${label}`}
+                onClick={() => setView(key)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  view === key
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4" data-lucide={aria} />
+                {label}
+              </button>
+            ))}
+          </div>
+          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupByKey)}>
+            <SelectTrigger className="w-44">
+              <Layers className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+              <SelectValue placeholder="Group by" />
+            </SelectTrigger>
+            <SelectContent>
+              {GROUP_BY_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <Select value={sort} onValueChange={setSort}>
           <SelectTrigger className="w-44">
@@ -601,6 +789,63 @@ export default function CreatorsPage() {
         </Select>
       </div>
 
+      {/* Bulk edit bar (issue 6): appears once creators are selected */}
+      {me?.canBulkEdit && selectedIds.size > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+            <Check className="h-4 w-4" />
+            {selectedIds.size} selected
+          </span>
+          <Select value={bulkStageId} onValueChange={setBulkStageId}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Move to stage…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Keep current stage</SelectItem>
+              {stages.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={bulkShopify} onValueChange={setBulkShopify}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="Shopify status…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Keep Shopify</SelectItem>
+              <SelectItem value="yes">Mark Shopify registered</SelectItem>
+              <SelectItem value="no">Mark not registered</SelectItem>
+            </SelectContent>
+          </Select>
+          <MultiSelect
+            options={owners.map((o) => ({ value: o.value, label: o.label }))}
+            value={bulkOwners}
+            onChange={setBulkOwners}
+            placeholder="Change owners…"
+            triggerClassName="w-48"
+          />
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!bulkStageId && !bulkShopify && bulkOwners.length === 0}
+              onClick={() => setBulkOpen(true)}
+            >
+              Apply to {selectedIds.size}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              <X className="mr-1 h-3.5 w-3.5" /> Clear
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -608,7 +853,16 @@ export default function CreatorsPage() {
           ))}
         </div>
       ) : view === "card" ? (
-        <GroupedCreatorCards creators={creators} groupBy={groupBy} />
+        <GroupedCreatorCards
+          creators={creators}
+          groupBy={groupBy}
+          onStageChanged={(id, stage) =>
+            setCreators((prev) => prev.map((c) => (c.id === id ? { ...c, stage } : c)))
+          }
+          selectedIds={me?.canBulkEdit ? selectedIds : undefined}
+          onToggleSelect={me?.canBulkEdit ? toggleSelect : undefined}
+          onReassigned={load}
+        />
       ) : view === "table" ? (
         <CreatorsTable
           creators={creators}
@@ -617,9 +871,22 @@ export default function CreatorsPage() {
           }
           exportable={!!me?.canExport}
           onExport={exportCsv}
+          selectionEnabled={!!me?.canBulkEdit}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
+          onToggleSelectAll={toggleSelectAll}
+          groupBy={groupBy}
+          onReassigned={load}
         />
       ) : (
-        <KanbanBoard creators={creators} stages={stages} />
+        <KanbanBoard
+          creators={creators}
+          stages={stages}
+          groupBy={groupBy}
+          selectedIds={me?.canBulkEdit ? selectedIds : undefined}
+          onToggleSelect={me?.canBulkEdit ? toggleSelect : undefined}
+          onReassigned={load}
+        />
       )}
 
       <CreatorFormDialog
@@ -636,6 +903,49 @@ export default function CreatorsPage() {
         onOpenChange={setImportOpen}
         onDone={() => load()}
       />
+
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Apply changes to {selectedIds.size} creators?</DialogTitle>
+            <DialogDescription>
+              This updates every selected creator at once. Each change is logged on the creator&apos;s
+              activity feed.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="space-y-1.5 text-sm text-muted-foreground">
+            {bulkStageId ? (
+              <li className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 shrink-0 text-primary" />
+                Stage → {stages.find((s) => s.id === bulkStageId)?.name}
+              </li>
+            ) : null}
+            {bulkShopify ? (
+              <li className="flex items-center gap-2">
+                <Check className="h-4 w-4 shrink-0 text-primary" />
+                Shopify → {bulkShopify === "yes" ? "registered" : "not registered"}
+              </li>
+            ) : null}
+            {bulkOwners.length ? (
+              <li className="flex items-center gap-2">
+                <Check className="h-4 w-4 shrink-0 text-primary" />
+                Owners → {owners.filter((o) => bulkOwners.includes(o.value)).map((o) => o.label).join(", ")}
+              </li>
+            ) : null}
+            {!bulkStageId && !bulkShopify && bulkOwners.length === 0 ? (
+              <li>Nothing selected to change.</li>
+            ) : null}
+          </ul>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)} disabled={bulkBusy}>
+              Cancel
+            </Button>
+            <Button onClick={() => void applyBulk()} disabled={bulkBusy || (!bulkStageId && !bulkShopify && bulkOwners.length === 0)}>
+              {bulkBusy ? "Applying…" : "Apply"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

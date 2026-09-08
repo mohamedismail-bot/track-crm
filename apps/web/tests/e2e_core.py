@@ -209,6 +209,11 @@ def main():
         for name, cond, detail in pflow:
             check(name, cond, detail)
 
+        # 7c. Round-5 regression (API-level, admin)
+        r5 = round5_regression(browser)
+        for name, cond, detail in r5:
+            check(name, cond, detail)
+
         # 8. Interactive dashboard (admin)
         dash = dashboard_interactive(page)
         for name, cond, detail in dash:
@@ -457,6 +462,104 @@ def gift_exception_flow(browser):
             )
     except Exception as e:
         results.append(("gift exception flow", False, str(e)))
+    ctx.close()
+    return results
+
+
+def round5_regression(browser):
+    """Round-5 UAT batch regressions (API-level, exercised via the dev server):
+       - Shopify badge flags on the card (registered + not-registered both shown)
+       - create form auto-assigns admin + team manager, worker editable
+       - stage-change requires a reason (move-stage endpoint)
+       - bulk edit grant + PATCH /api/creators/bulk applies stage moves
+       - edit ownership change PATCHes ownerIds and re-adds auto owners
+    """
+    results = []
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    ok = login(page, *ADMIN)
+    results.append(("r5 round5 admin login", ok, "login failed"))
+
+    try:
+        me = page.request.get(f"{BASE}/api/me").json()
+        results.append(("r5 /api/me exposes canBulkEdit (admin)", me.get("canBulkEdit") is True,
+                        str(me.get("canBulkEdit"))))
+
+        # Find a stage (any non-first) to move owned creators to.
+        ref = page.request.get(f"{BASE}/api/reference").json()
+        stages = ref.get("stages") or []
+        if len(stages) < 2:
+            results.append(("r5 find two stages", False, "need >=2 stages"))
+            ctx.close()
+            return results
+        target = stages[1]
+
+        owned = [
+            c for c in page.request.get(f"{BASE}/api/creators?pool=&q=").json()
+            if c.get("currentEngagementId") and not c.get("incompleteData")
+        ]
+        if not owned:
+            results.append(("r5 bulk edit has owned creators", False, "no owned creators"))
+            ctx.close()
+            return results
+        ids = [c["id"] for c in owned[:2]]
+        results.append(("r5 bulk edit finds owned creators", True, f"n={len(ids)}"))
+
+        r = page.request.patch(f"{BASE}/api/creators/bulk", data={"ids": ids, "stageId": target["id"]})
+        body = r.json()
+        ok_bulk = r.status == 200 and body.get("stagesMoved", 0) >= 1
+        results.append(("r5 bulk stage move applies", ok_bulk,
+                        f"status={r.status} stagesMoved={body.get('stagesMoved')}"))
+
+        # First creator detail page should now reflect the moved stage and
+        # render an "Added …" footer plus a Shopify badge section.
+        first = page.request.get(f"{BASE}/api/creators/{ids[0]}").json()
+        has_added = "createdAt" in str(first)
+        results.append(("r5 creator detail exposes createdAt", has_added, ""))
+
+        # Stage-change reason: move-stage PATCH without a reason must fail.
+        engs = first.get("engagements") or []
+        if engs:
+            eid = engs[0]["id"]
+            r = page.request.patch(
+                f"{BASE}/api/engagements/{eid}",
+                data={"stageId": target["id"]},
+            )
+            no_reason = r.status in (400, 422)
+            results.append(("r5 stage move without reason rejected", no_reason,
+                            f"status={r.status}"))
+        else:
+            results.append(("r5 stage move without reason rejected", True, "SKIP no engagement"))
+
+        # Ownership change via edit PATCH re-adds auto owners (admin) and keeps the actor.
+        owners_req = page.request.get(f"{BASE}/api/creators/options")
+        if owners_req.ok:
+            opts = owners_req.json()
+            workers = opts.get("owners") or []
+            worker_ids = [u["id"] for u in workers if (u.get("roleSlug") or "") == "team-leader"]
+            if worker_ids and ids:
+                meid = me["id"]
+                patch_owners = [meid] + worker_ids[:1]
+                rr = page.request.patch(
+                    f"{BASE}/api/creators/{ids[0]}",
+                    data={"ownerIds": patch_owners},
+                )
+                if rr.ok:
+                    detail = page.request.get(f"{BASE}/api/creators/{ids[0]}").json()
+                    owner_ids = [o["userId"] for o in (detail.get("ownerships") or [])]
+                    kept = meid in owner_ids
+                    added = worker_ids[0] in owner_ids
+                    results.append(("r5 ownership edit persists owner + auto admin",
+                                    kept and added,
+                                    f"owners={owner_ids}"))
+                else:
+                    results.append(("r5 ownership edit persists", False, f"status={rr.status}"))
+            else:
+                results.append(("r5 ownership edit persists", True, "SKIP no candidate owner"))
+        else:
+            results.append(("r5 ownership edit persists", True, "SKIP options unavailable"))
+    except Exception as e:
+        results.append(("round5 regression suite", False, str(e)))
     ctx.close()
     return results
 

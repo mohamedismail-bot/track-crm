@@ -675,6 +675,8 @@ export interface CreatorListFilters {
   city?: string;
   creatorType?: string;
   custom?: Record<string, string>;
+  createdFrom?: string;
+  createdTo?: string;
   sort?: "latest" | "oldest" | "name-asc" | "name-desc" | "created-desc" | "created-asc";
 }
 
@@ -726,6 +728,86 @@ export async function canExportCreators(user: SessionUser): Promise<boolean> {
   return false;
 }
 
+/**
+ * Whether a user may bulk-edit creators (stage, owner, Shopify status).
+ * Admins always can; otherwise the grant comes from the workspace
+ * "bulkEdit.enabledRoles" (role-based) or per-user "bulkEdit.enabledUserIds".
+ */
+export async function canBulkEditCreators(user: SessionUser): Promise<boolean> {
+  if (user.roleSlug === "admin") return true;
+  const s = await import("./settings").then((m) => m.getSettings());
+  if (s.bulkEditEnabledRoles.includes(user.roleSlug)) return true;
+  if (s.bulkEditEnabledUserIds.includes(user.id)) return true;
+  return false;
+}
+
+/**
+ * Resolve the final set of ownerships for an owner-IDs change (create, edit or
+ * bulk reassign). Rules mirror creation: assignments are limited to the acting
+ * user's team unless the Ownership Policy allows multiple teams, and Admin(s)
+ * plus each involved team's Team Manager(s) are always owners (never removed).
+ * Returns the ownership rows to write; throws a user-facing message on any
+ * invalid or disallowed selection.
+ */
+export async function resolveOwnerships(
+  user: SessionUser,
+  requestedOwnerIds: string[] | undefined,
+  opts: { defaultToSelf?: boolean } = {},
+): Promise<{ userId: string; teamId: string }[]> {
+  const ownerIds = Array.isArray(requestedOwnerIds)
+    ? Array.from(new Set(requestedOwnerIds.filter((id) => typeof id === "string" && id)))
+    : [];
+
+  let base: { userId: string; teamId: string }[] = [];
+  if (ownerIds.length > 0) {
+    const ownerRows = await prisma.user.findMany({
+      where: { id: { in: ownerIds }, archivedAt: null },
+      select: { id: true, teamId: true },
+    });
+    if (ownerRows.length !== ownerIds.length) {
+      throw new Error("One of the selected owners is not a valid user.");
+    }
+    const settings = await import("./settings").then((m) => m.getSettings());
+    if (!settings.multiTeam && ownerRows.some((o) => o.teamId !== user.teamId)) {
+      throw new Error("Assignments are limited to your own team by the Ownership Policy.");
+    }
+    base = ownerRows.filter((o) => o.teamId != null).map((o) => ({ userId: o.id, teamId: o.teamId! }));
+  } else if (opts.defaultToSelf !== false) {
+    base = [{ userId: user.id, teamId: user.teamId }];
+  }
+
+  const teamIds = new Set(base.map((o) => o.teamId));
+  const [admins, teamManagers] = await Promise.all([
+    prisma.user.findMany({
+      where: { archivedAt: null, role: { slug: "admin" } },
+      select: { id: true, teamId: true },
+    }),
+    prisma.user.findMany({
+      where: { archivedAt: null, role: { slug: "team-manager" }, teamId: { in: [...teamIds] } },
+      select: { id: true, teamId: true },
+    }),
+  ]);
+  const autoOwners = [...admins, ...teamManagers]
+    .filter((u) => !base.some((o) => o.userId === u.id) && u.teamId != null)
+    .map((o) => ({ userId: o.id, teamId: o.teamId! }));
+
+  return [...base, ...autoOwners];
+}
+
+/** Persist a resolved ownership set for a creator. */
+export async function replaceCreatorOwnerships(
+  creatorId: string,
+  ownerships: { userId: string; teamId: string }[],
+  tx: Prisma.TransactionClient = prisma,
+) {
+  await tx.creatorOwnership.deleteMany({ where: { creatorId } });
+  if (ownerships.length > 0) {
+    await tx.creatorOwnership.createMany({
+      data: ownerships.map((o) => ({ creatorId, userId: o.userId, teamId: o.teamId })),
+    });
+  }
+}
+
 /** Parse the shared creator-list query params (used by GET /api/creators and the export route). */
 export function parseCreatorListFilters(params: URLSearchParams): CreatorListFilters {
   const custom: Record<string, string> = {};
@@ -757,6 +839,8 @@ export function parseCreatorListFilters(params: URLSearchParams): CreatorListFil
     country: params.get("country") ?? "",
     city: params.get("city") ?? "",
     creatorType: params.get("creatorType") ?? "",
+    createdFrom: params.get("createdFrom") ?? "",
+    createdTo: params.get("createdTo") ?? "",
     sort,
     custom,
   };
@@ -803,6 +887,12 @@ export async function listCreators(user: SessionUser, filters: CreatorListFilter
     ...(filters.country ? [{ countryId: filters.country }] : []),
     ...(filters.city ? [{ cityId: filters.city }] : []),
     ...(filters.creatorType ? [{ creatorTypeId: filters.creatorType }] : []),
+    ...(filters.createdFrom
+      ? [{ createdAt: { gte: new Date(`${filters.createdFrom}T00:00:00`) } }]
+      : []),
+    ...(filters.createdTo
+      ? [{ createdAt: { lte: new Date(`${filters.createdTo}T23:59:59`) } }]
+      : []),
     ...(engagementConditions.length ? [{ engagements: { some: { AND: engagementConditions } } }] : []),
     ...(filters.pending
       ? [{ approvalStatus: { in: ["PENDING", "REJECTED"] as ApprovalStatus[] } }]

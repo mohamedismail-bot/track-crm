@@ -38,6 +38,8 @@ interface SettingsData {
   shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
   exportEnabledUserIds: string[];
+  bulkEditEnabledRoles: string[];
+  bulkEditEnabledUserIds: string[];
   passwordMinLength: number;
   passwordComplexity: boolean;
   genderOptions: string[];
@@ -177,6 +179,8 @@ export default function SettingsPage() {
       fd.append("unassignedVisibleFields", JSON.stringify(data.unassignedVisibleFields ?? ["platformLink", "creatorName"]));
       fd.append("exportEnabledRoles", JSON.stringify(data.exportEnabledRoles ?? []));
       fd.append("exportEnabledUserIds", JSON.stringify(data.exportEnabledUserIds ?? []));
+      fd.append("bulkEditEnabledRoles", JSON.stringify(data.bulkEditEnabledRoles ?? []));
+      fd.append("bulkEditEnabledUserIds", JSON.stringify(data.bulkEditEnabledUserIds ?? []));
       if (logoFile) {
         fd.append("logo", logoFile);
       } else if (removeLogo) {
@@ -844,22 +848,37 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <ExportCard
+      <GrantCard
+        title="CSV export access"
+        description="Control who can export creators to CSV. Admins can always export. Enable whole roles and/or specific team members below."
         roles={data.exportEnabledRoles}
         userIds={data.exportEnabledUserIds}
         onRolesChange={(v) => set("exportEnabledRoles", v)}
         onUserIdsChange={(v) => set("exportEnabledUserIds", v)}
       />
+
+      <GrantCard
+        title="Bulk edit access"
+        description="Control who can bulk-edit creators: move many to a stage, change their owners, or update Shopify status in one go. Admins can always bulk-edit."
+        roles={data.bulkEditEnabledRoles}
+        userIds={data.bulkEditEnabledUserIds}
+        onRolesChange={(v) => set("bulkEditEnabledRoles", v)}
+        onUserIdsChange={(v) => set("bulkEditEnabledUserIds", v)}
+      />
     </div>
   );
 }
 
-function ExportCard({
+function GrantCard({
+  title,
+  description,
   roles,
   userIds,
   onRolesChange,
   onUserIdsChange,
 }: {
+  title: string;
+  description: string;
   roles: string[];
   userIds: string[];
   onRolesChange: (roles: string[]) => void;
@@ -895,17 +914,14 @@ function ExportCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">CSV export access</CardTitle>
-        <CardDescription>
-          Control who can export creators to CSV. Admins can always export. Enable whole roles
-          and/or specific team members below.
-        </CardDescription>
+        <CardTitle className="text-base">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
         <div className="space-y-2">
           <Label>Roles</Label>
           {rolesList.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No exportable roles available.</p>
+            <p className="text-sm text-muted-foreground">No grantable roles available.</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {rolesList.map((r) => (

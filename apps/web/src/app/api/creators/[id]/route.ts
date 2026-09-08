@@ -205,6 +205,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ? { ...existingCustom, ...(body.customFields as Record<string, unknown>) }
         : existingCustom;
 
+    // Capture prior owner names so an ownership change can be logged.
+    const oldOwners = await prisma.user.findMany({
+      where: { id: { in: creatorBefore.ownerships.map((o) => o.userId) } },
+      select: { id: true, displayName: true },
+    });
+    const oldOwnerNames = oldOwners.map((o) => o.displayName);
+
     const { validateCreatorInput, phoneFromInput } = await import("@/lib/creators");
     const validation = await validateCreatorInput(merged as never, { isCreate: false });
 
@@ -290,6 +297,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return updated;
     });
 
+    let ownershipChangedAfter: string[] | null = null;
+    if (body.ownerIds !== undefined) {
+      const { resolveOwnerships, replaceCreatorOwnerships } = await import("@/lib/creators");
+      const ownerships = await resolveOwnerships(session, body.ownerIds as string[] | undefined, {
+        defaultToSelf: false,
+      });
+      await replaceCreatorOwnerships(id, ownerships);
+      const newOwners = await prisma.user.findMany({
+        where: { id: { in: ownerships.map((o) => o.userId) } },
+        select: { displayName: true },
+      });
+      ownershipChangedAfter = newOwners.map((o) => o.displayName);
+    }
+
     await logActivity({
       creatorId: id,
       kind: "SYSTEM",
@@ -300,6 +321,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           : "Creator details updated",
       authorId: session.id,
     });
+    if (ownershipChangedAfter) {
+      await logActivity({
+        creatorId: id,
+        kind: "SYSTEM",
+        type: "OWNERSHIP_CHANGED",
+        summary: `Owners changed: ${oldOwnerNames.length ? oldOwnerNames.join(", ") : "none"} → ${ownershipChangedAfter.length ? ownershipChangedAfter.join(", ") : "none"}`,
+        authorId: session.id,
+      });
+    }
     await logTransaction({
       userId: session.id,
       action: "creator.update",

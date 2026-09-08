@@ -74,6 +74,7 @@ import {
 } from "@/lib/display";
 import { ACTIVITY_TYPE_LABELS } from "@/lib/constants";
 import { CreatorFormDialog, type EditableCreatorInput } from "@/components/creators/creator-form";
+import { StageChangeDialog, moveStageWithReason } from "@/components/creators/stage-change-dialog";
 import type { Platform, DealType, ApprovalStatus } from "@prisma/client";
 
 type Relationship = "owned" | "same_team" | "same_team_manager" | "other_team" | "available" | "none";
@@ -160,7 +161,8 @@ interface CreatorDetail {
   profiles: Profile[];
   ownerships: {
     userId: string;
-    user: { displayName: string };
+    teamId: string | null;
+    user: { displayName: string; role?: { slug?: string } | null };
     team: { name: string };
   }[];
   engagements: Engagement[];
@@ -311,6 +313,8 @@ export default function CreatorProfilePage() {
   const [loading, setLoading] = React.useState(true);
   const [notFound, setNotFound] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
+  const [pendingStage, setPendingStage] = React.useState<string | null>(null);
+  const [stageBusy, setStageBusy] = React.useState(false);
   const [giftOpen, setGiftOpen] = React.useState(false);
   const [giftEngagementId, setGiftEngagementId] = React.useState("");
   const [giftProductName, setGiftProductName] = React.useState("");
@@ -382,8 +386,20 @@ export default function CreatorProfilePage() {
             profiles: creator.profiles.map((p) => ({
               platform: p.platform,
               handle: p.handle,
+              url: p.url,
               isPrimary: p.isPrimary,
             })),
+            owners: creator.ownerships.map((o) => ({
+              id: o.userId,
+              displayName: o.user.displayName,
+              teamId: o.teamId ?? null,
+              roleSlug: o.user.role?.slug ?? "",
+            })),
+            canEditOwners:
+              me?.roleSlug === "admin" ||
+              creator.canMove ||
+              creator.relationship === "same_team_manager" ||
+              (creator.approvalStatus != null && creator.createdBy?.id === me?.id),
             countryValue: creator.countryRef?.name ?? null,
             cityValue: creator.cityRef?.name ?? null,
             creatorTypeValue: creator.creatorTypeRef?.name ?? null,
@@ -526,14 +542,17 @@ export default function CreatorProfilePage() {
 
   const moveStage = async (stageId: string) => {
     if (!currentEngagement || stageId === currentEngagement.stage?.id) return;
-    const res = await fetch(`/api/engagements/${currentEngagement.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "move-stage", stageId }),
-    });
-    const j = await res.json();
-    if (!res.ok) return toast({ title: j.error ?? "Could not move stage", variant: "destructive" });
-    toast({ title: `Moved to ${j.stageName ?? "new stage"}` });
+    setPendingStage(stageId);
+  };
+
+  const confirmStageMove = async (reason: string) => {
+    if (!currentEngagement || !pendingStage) return;
+    setStageBusy(true);
+    const res = await moveStageWithReason(currentEngagement.id, pendingStage, reason);
+    setStageBusy(false);
+    if (!res.ok) return toast({ title: res.error ?? "Could not move stage", variant: "destructive" });
+    setPendingStage(null);
+    toast({ title: `Moved to ${res.stageName ?? "new stage"}` });
     await load();
   };
 
@@ -751,6 +770,19 @@ export default function CreatorProfilePage() {
         mode="edit"
         initial={editInitial}
         onSaved={load}
+      />
+
+      <StageChangeDialog
+        open={pendingStage !== null}
+        onOpenChange={(v) => !v && setPendingStage(null)}
+        title={
+          pendingStage
+            ? `Move to ${refData?.stages.find((s) => s.id === pendingStage)?.name ?? "new stage"}`
+            : "Move to"
+        }
+        description={creator ? `${creator.name} — recorded on their activity log.` : undefined}
+        onConfirm={(reason) => void confirmStageMove(reason)}
+        busy={stageBusy}
       />
 
       <Dialog open={giftOpen} onOpenChange={setGiftOpen}>

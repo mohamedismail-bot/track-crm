@@ -111,10 +111,54 @@ export async function PUT(req: NextRequest) {
     }
     entries[SETTING_KEYS.SHOPIFY_MIN_STAGE_ID] = stageId === "none" ? "" : stageId;
   }
-  if (body.exportEnabledRoles !== undefined)
-    entries[SETTING_KEYS.EXPORT_ENABLED_ROLES] = JSON.stringify(body.exportEnabledRoles ?? []);
-  if (body.exportEnabledUserIds !== undefined)
-    entries[SETTING_KEYS.EXPORT_ENABLED_USER_IDS] = JSON.stringify(body.exportEnabledUserIds ?? []);
+  if (body.exportEnabledRoles !== undefined) {
+    let arr: unknown = body.exportEnabledRoles;
+    if (typeof arr === "string") {
+      try {
+        arr = JSON.parse(arr);
+      } catch {
+        return jsonError("exportEnabledRoles must be a JSON array of strings.", 400);
+      }
+    }
+    if (!Array.isArray(arr) || arr.some((x) => typeof x !== "string")) return jsonError("exportEnabledRoles must be a JSON array of strings.", 400);
+    entries[SETTING_KEYS.EXPORT_ENABLED_ROLES] = JSON.stringify(arr);
+  }
+  if (body.exportEnabledUserIds !== undefined) {
+    let arr: unknown = body.exportEnabledUserIds;
+    if (typeof arr === "string") {
+      try {
+        arr = JSON.parse(arr);
+      } catch {
+        return jsonError("exportEnabledUserIds must be a JSON array of strings.", 400);
+      }
+    }
+    if (!Array.isArray(arr) || arr.some((x) => typeof x !== "string")) return jsonError("exportEnabledUserIds must be a JSON array of strings.", 400);
+    entries[SETTING_KEYS.EXPORT_ENABLED_USER_IDS] = JSON.stringify(arr);
+  }
+  if (body.bulkEditEnabledRoles !== undefined) {
+    let arr: unknown = body.bulkEditEnabledRoles;
+    if (typeof arr === "string") {
+      try {
+        arr = JSON.parse(arr);
+      } catch {
+        return jsonError("bulkEditEnabledRoles must be a JSON array of strings.", 400);
+      }
+    }
+    if (!Array.isArray(arr) || arr.some((x) => typeof x !== "string")) return jsonError("bulkEditEnabledRoles must be a JSON array of strings.", 400);
+    entries[SETTING_KEYS.BULK_EDIT_ENABLED_ROLES] = JSON.stringify(arr);
+  }
+  if (body.bulkEditEnabledUserIds !== undefined) {
+    let arr: unknown = body.bulkEditEnabledUserIds;
+    if (typeof arr === "string") {
+      try {
+        arr = JSON.parse(arr);
+      } catch {
+        return jsonError("bulkEditEnabledUserIds must be a JSON array of strings.", 400);
+      }
+    }
+    if (!Array.isArray(arr) || arr.some((x) => typeof x !== "string")) return jsonError("bulkEditEnabledUserIds must be a JSON array of strings.", 400);
+    entries[SETTING_KEYS.BULK_EDIT_ENABLED_USER_IDS] = JSON.stringify(arr);
+  }
   if (body.passwordMinLength !== undefined) {
     const n = Number(body.passwordMinLength);
     if (!Number.isFinite(n) || n < 6) return jsonError("Minimum password length must be at least 6.", 400);

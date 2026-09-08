@@ -16,6 +16,8 @@ export interface WorkspaceSettings {
   shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
   exportEnabledUserIds: string[];
+  bulkEditEnabledRoles: string[];
+  bulkEditEnabledUserIds: string[];
   passwordMinLength: number;
   passwordComplexity: boolean;
   genderOptions: string[];
@@ -43,6 +45,8 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     shopifyMinStageId: all[SETTING_KEYS.SHOPIFY_MIN_STAGE_ID] || null,
     exportEnabledRoles: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_ROLES]),
     exportEnabledUserIds: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_USER_IDS]),
+    bulkEditEnabledRoles: jsonArray(all[SETTING_KEYS.BULK_EDIT_ENABLED_ROLES]),
+    bulkEditEnabledUserIds: jsonArray(all[SETTING_KEYS.BULK_EDIT_ENABLED_USER_IDS]),
     passwordMinLength: safeInt(all[SETTING_KEYS.PASSWORD_MIN_LENGTH], 8),
     passwordComplexity: all[SETTING_KEYS.PASSWORD_COMPLEXITY] === "true",
     genderOptions: jsonArray(all[SETTING_KEYS.GENDER_OPTIONS]),

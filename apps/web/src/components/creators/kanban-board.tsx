@@ -6,6 +6,8 @@ import { DragDropContext, Draggable, Droppable, type DropResult } from "@hello-p
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { CreatorListItem, CreatorCard } from "./creator-card";
+import { StageChangeDialog, moveStageWithReason } from "./stage-change-dialog";
+import { groupCreators, type GroupByKey } from "@/lib/grouping";
 
 export interface KanbanStage {
   id: string;
@@ -17,12 +19,21 @@ export interface KanbanStage {
 export function KanbanBoard({
   creators,
   stages,
+  groupBy = "none",
+  selectedIds,
+  onToggleSelect,
+  onReassigned,
 }: {
   creators: CreatorListItem[];
   stages: KanbanStage[];
+  groupBy?: GroupByKey;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (creatorId: string, selected: boolean) => void;
+  onReassigned?: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
+  const [pendingDrag, setPendingDrag] = React.useState<{ creator: CreatorListItem; stage: KanbanStage } | null>(null);
   const [stageOverrides, setStageOverrides] = React.useState<
     Record<string, { id: string | null; name: string | null }>
   >({});
@@ -65,7 +76,7 @@ export function KanbanBoard({
     });
   };
 
-  const onDragEnd = async (result: DropResult) => {
+  const onDragEnd = (result: DropResult) => {
     if (!result.destination) return;
     const { draggableId, destination } = result;
     const targetStageId = destination.droppableId === "unassigned" ? null : destination.droppableId;
@@ -81,7 +92,6 @@ export function KanbanBoard({
       });
       return;
     }
-
     if (!creator.currentEngagementId) {
       toast({
         title: "No open engagement",
@@ -90,8 +100,6 @@ export function KanbanBoard({
       });
       return;
     }
-
-    // An engagement always lives at some stage; moving to "no stage" is invalid.
     if (!targetStageId) {
       toast({
         title: "Cannot remove stage",
@@ -100,34 +108,38 @@ export function KanbanBoard({
       });
       return;
     }
+    const stage = stages.find((s) => s.id === targetStageId);
+    if (!stage) return;
+    setPendingDrag({ creator, stage });
+  };
 
-    const stage = standardStages.find((s) => s.id === targetStageId);
+  const confirmDrag = async (reason: string) => {
+    if (!pendingDrag) return;
+    const { creator, stage } = pendingDrag;
     setStageOverrides((prev) => ({
       ...prev,
-      [draggableId]: stage ? { id: stage.id, name: stage.name } : { id: null, name: null },
+      [creator.id]: { id: stage.id, name: stage.name },
     }));
-
     setBusy(true);
-    try {
-      const res = await fetch(`/api/engagements/${creator.currentEngagementId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "move-stage", stageId: targetStageId }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        revertOverride(draggableId);
-        toast({ title: data.error ?? "Could not move stage", variant: "destructive" });
-        return;
-      }
-      toast({ title: "Moved", description: `${creator.name} → ${data.stageName}` });
-      router.refresh();
-    } catch {
-      revertOverride(draggableId);
-      toast({ title: "Could not move stage", variant: "destructive" });
-    } finally {
+    const res = await moveStageWithReason(creator.currentEngagementId!, stage.id, reason);
+    if (!res.ok) {
+      revertOverride(creator.id);
+      toast({ title: res.error ?? "Could not move stage", variant: "destructive" });
       setBusy(false);
+      return;
     }
+    toast({ title: "Moved", description: `${creator.name} → ${res.stageName}` });
+    setPendingDrag(null);
+    setBusy(false);
+    router.refresh();
+  };
+
+  // Issue 12: stage dropdowns inside the board update the column immediately.
+  const handleCardStageChanged = (creatorId: string, stage: { id: string; name: string } | null) => {
+    setStageOverrides((prev) => ({
+      ...prev,
+      [creatorId]: stage ? { id: stage.id, name: stage.name } : { id: null, name: null },
+    }));
   };
 
   const renderCard = (c: CreatorListItem, index: number) => (
@@ -137,15 +149,32 @@ export function KanbanBoard({
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          className={`mb-2 transition-shadow ${
-            snapshot.isDragging ? "drop-shadow-md" : ""
-          }`}
+          className={`mb-2 transition-shadow ${snapshot.isDragging ? "drop-shadow-md" : ""}`}
         >
-          <CreatorCard creator={c} />
+          <CreatorCard
+            creator={c}
+            onStageChanged={handleCardStageChanged}
+            selected={selectedIds?.has(c.id)}
+            onToggleSelect={onToggleSelect}
+            onReassigned={onReassigned}
+          />
         </div>
       )}
     </Draggable>
   );
+
+  const renderGrouped = (items: CreatorListItem[]) => {
+    if (groupBy === "none") return items.map(renderCard);
+    return groupCreators(items, groupBy).map((g) => (
+      <div key={g.label} className="mb-2">
+        <p className="mb-1 flex items-center gap-1 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {g.label}
+          <span className="rounded-full border px-1.5 text-[10px] font-medium normal-case">{g.items.length}</span>
+        </p>
+        {g.items.map((c, gi) => renderCard(c, gi))}
+      </div>
+    ));
+  };
 
   const renderColumn = (stage: KanbanStage, isCompleted: boolean) => (
     <Droppable key={stage.id} droppableId={stage.id}>
@@ -169,7 +198,7 @@ export function KanbanBoard({
               {creatorsByStage(stage.id).length}
             </Badge>
           </div>
-          {creatorsByStage(stage.id).map(renderCard)}
+          {renderGrouped(creatorsByStage(stage.id))}
           {provided.placeholder}
         </div>
       )}
@@ -185,55 +214,70 @@ export function KanbanBoard({
   }
 
   return (
-    <DragDropContext onDragEnd={onDragEnd}>
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {standardStages.map((s) => renderColumn(s, false))}
-        {completedStages.map((s) => renderColumn(s, true))}
-        <Droppable droppableId="unassigned">
-          {(provided, snapshot) => (
-            <div
-              ref={provided.innerRef}
-              {...provided.droppableProps}
-              className={`w-64 shrink-0 rounded-lg border border-dashed p-2 transition-colors ${
-                snapshot.isDraggingOver ? "border-primary/50 bg-primary/5" : "border-border"
-              }`}
-            >
+    <>
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {standardStages.map((s) => renderColumn(s, false))}
+          {completedStages.map((s) => renderColumn(s, true))}
+          <Droppable droppableId="unassigned">
+            {(provided, snapshot) => (
+              <div
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+                className={`w-64 shrink-0 rounded-lg border border-dashed p-2 transition-colors ${
+                  snapshot.isDraggingOver ? "border-primary/50 bg-primary/5" : "border-border"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    No engagement
+                  </span>
+                  <Badge variant="secondary" className="px-1.5">
+                    {unassigned.length}
+                  </Badge>
+                </div>
+                {renderGrouped(unassigned)}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+          {otherMoved.length > 0 && (
+            <div className="w-64 shrink-0 rounded-lg border bg-muted/40 p-2">
               <div className="mb-2 flex items-center justify-between px-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  No engagement
+                  Other stages
                 </span>
                 <Badge variant="secondary" className="px-1.5">
-                  {unassigned.length}
+                  {otherMoved.length}
                 </Badge>
               </div>
-              {unassigned.map(renderCard)}
-              {provided.placeholder}
+              {otherStageNames.length > 0 && (
+                <p className="mb-2 px-1 text-[11px] text-muted-foreground">
+                  {otherStageNames.join(" · ")}
+                </p>
+              )}
+              {otherMoved.map((c) => (
+                <div key={c.id} className="mb-2">
+                  <CreatorCard
+                    creator={c}
+                    selected={selectedIds?.has(c.id)}
+                    onToggleSelect={onToggleSelect}
+                    onReassigned={onReassigned}
+                  />
+                </div>
+              ))}
             </div>
           )}
-        </Droppable>
-        {otherMoved.length > 0 && (
-          <div className="w-64 shrink-0 rounded-lg border p-2 bg-muted/40">
-            <div className="mb-2 flex items-center justify-between px-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Other stages
-              </span>
-              <Badge variant="secondary" className="px-1.5">
-                {otherMoved.length}
-              </Badge>
-            </div>
-            {otherStageNames.length > 0 && (
-              <p className="mb-2 px-1 text-[11px] text-muted-foreground">
-                {otherStageNames.join(" · ")}
-              </p>
-            )}
-            {otherMoved.map((c) => (
-              <div key={c.id} className="mb-2">
-                <CreatorCard creator={c} />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </DragDropContext>
+        </div>
+      </DragDropContext>
+      <StageChangeDialog
+        open={pendingDrag !== null}
+        onOpenChange={(v) => !v && setPendingDrag(null)}
+        title={pendingDrag ? `Move to ${pendingDrag.stage.name}` : "Move to"}
+        description={pendingDrag ? `${pendingDrag.creator.name} — recorded on their activity log.` : undefined}
+        onConfirm={(reason) => void confirmDrag(reason)}
+        busy={busy}
+      />
+    </>
   );
 }

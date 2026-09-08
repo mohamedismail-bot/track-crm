@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -111,7 +112,9 @@ export interface EditableCreatorInput {
   engagementRate: number | null;
   notes: string | null;
   customFields: Record<string, string | number | boolean | null>;
-  profiles: { platform: string; handle: string | null; isPrimary: boolean }[];
+  profiles: { platform: string; handle: string | null; url?: string | null; isPrimary: boolean }[];
+  owners?: { id: string; displayName: string; teamId: string | null; roleSlug: string }[] | null;
+  canEditOwners?: boolean;
   countryValue: string | null;
   cityValue: string | null;
   creatorTypeValue: string | null;
@@ -150,7 +153,7 @@ export function CreatorFormDialog({
   const [cityId, setCityId] = React.useState("");
   const [creatorTypeId, setCreatorTypeId] = React.useState("");
   const [niche, setNiche] = React.useState<string[]>([]);
-  const [ownerIds, setOwnerIds] = React.useState<string[]>([]);
+  const [workerOwnerIds, setWorkerOwnerIds] = React.useState<string[]>([]);
   const [ownerOptions, setOwnerOptions] = React.useState<OwnerOption[]>([]);
   const [hardOwnerIds, setHardOwnerIds] = React.useState<string[]>([]);
   const [me, setMe] = React.useState<{ id: string; teamId: string | null } | null>(null);
@@ -210,7 +213,7 @@ export function CreatorFormDialog({
       setHardOwnerIds(hard);
       if (me?.id) {
         setMe((prev) => prev ?? { id: me.id, teamId: me.teamId ?? null });
-        setOwnerIds((prev) => Array.from(new Set([...(prev.length ? prev : [me.id]), ...hard])));
+        setWorkerOwnerIds((prev) => (prev.length ? prev : [me.id]));
       }
       const stageList = (opts?.stages ?? []) as { id: string; name: string }[];
       setStages(stageList);
@@ -234,6 +237,89 @@ export function CreatorFormDialog({
     if (egypt) setPhoneCountryId(egypt.id);
   }, [mode, phoneCountryId, ref]);
 
+  // Edit mode: resolve the phone's country by the longest matching dial code and
+  // strip its prefix from the stored E.164 number (depends on reference data).
+  React.useEffect(() => {
+    if (mode !== "edit" || !initial?.phone || !open) return;
+    const e164 = String(initial.phone).replace(/[^\d+]/g, "");
+    if (!/^\+\d+$/.test(e164)) return;
+    const match = (ref?.countries ?? [])
+      .filter((c) => e164.startsWith(c.dialCode))
+      .sort((a, b) => b.dialCode.length - a.dialCode.length)[0];
+    if (match) {
+      setPhoneCountryId(match.id);
+      setPhoneDigits(e164.slice(match.dialCode.length));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, initial?.id, ref, open]);
+
+  // Edit mode: load the assign-to owner list and default the worker selection to
+  // the creator's current owners (admins/managers stay locked via hardOwnerIds).
+  React.useEffect(() => {
+    if (!open || mode !== "edit") return;
+    let cancelled = false;
+    (async () => {
+      const [mRes, optsRes] = await Promise.all([
+        fetch("/api/me"),
+        fetch("/api/creators/options"),
+      ]);
+      if (cancelled) return;
+      const m = mRes.ok ? await mRes.json() : null;
+      setMe(m ? { id: m.id, teamId: m.teamId ?? null } : null);
+      const owners: OwnerOption[] = (optsRes.ok ? await optsRes.json() : null)?.owners?.map(
+        (o: { id: string; displayName: string; teamId: string; roleSlug: string }) => ({
+          id: o.id,
+          displayName: o.displayName,
+          teamId: o.teamId ?? null,
+          teamName: null,
+          roleSlug: o.roleSlug ?? "",
+        }),
+      ) ?? [];
+      setOwnerOptions(owners);
+      const currentIds = (initial?.owners ?? []).map((o) => o.id);
+      const currentTeams = new Set(
+        owners.filter((o) => currentIds.includes(o.id)).map((o) => o.teamId).filter(Boolean) as string[],
+      );
+      const hard = owners
+        .filter(
+          (o) =>
+            o.roleSlug === "admin" ||
+            (o.roleSlug === "team-manager" && o.teamId != null && currentTeams.has(o.teamId)),
+        )
+        .map((o) => o.id);
+      setHardOwnerIds(hard);
+      setWorkerOwnerIds(currentIds.filter((id) => !hard.includes(id)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, initial]);
+
+  // Clear any leftover state from a previous session every time the dialog opens
+  // in add mode so it never shows the previous creator's data.
+  React.useEffect(() => {
+    if (!open || mode !== "create") return;
+    setName("");
+    setGender("");
+    setEmail("");
+    setPhoneCountryId("");
+    setPhoneDigits("");
+    setCountryId("");
+    setCityId("");
+    setCreatorTypeId("");
+    setNiche([]);
+    setWorkerOwnerIds([]);
+    setFollowers("");
+    setEngagementRate("");
+    setNotes("");
+    setCustom({});
+    setProfiles([]);
+    setStageId("");
+    setEmailDup(null);
+    setPhoneDup(null);
+    setDupChecks({});
+  }, [open, mode]);
+
   React.useEffect(() => {
     if (mode === "edit" && initial && open) {
       setName(initial.name ?? "");
@@ -250,18 +336,16 @@ export function CreatorFormDialog({
       setProfiles(
         (initial.profiles ?? []).map((p) => ({
           platform: (p.platform as PlatformKey) || "OTHER",
-          input: p.handle ?? "",
+          input: (p.url || p.handle) ?? "",
           isPrimary: p.isPrimary,
         })),
       );
-      // Phone: split E.164 back into local digits (reuse the last dial code style).
       if (initial.phone) {
-        const digits = initial.phone.replace(/^\+\d+/, "");
+        const digits = String(initial.phone).replace(/[^\d]/g, "");
         setPhoneDigits(digits);
       } else {
         setPhoneDigits("");
       }
-      setPhoneCountryId(initial.countryId ?? "");
       setEmailDup(null);
       setPhoneDup(null);
       setDupChecks({});
@@ -284,10 +368,11 @@ export function CreatorFormDialog({
   const nicheOptions = ref?.nicheOptions ?? [];
   const lockedProtected = mode === "edit" && initial?.canEditProtected === false;
   const emailLocked = mode === "edit" && initial?.canEditProtected === false && !!initial?.email;
-  const ownerAssignable: MultiSelectOption[] = (me?.teamId
-    ? ownerOptions.filter((o) => o.teamId === me.teamId || hardOwnerIds.includes(o.id))
-    : ownerOptions
-  ).map((o) => ({ value: o.id, label: o.displayName, locked: hardOwnerIds.includes(o.id) }));
+  const hardOwners = ownerOptions.filter((o) => hardOwnerIds.includes(o.id));
+  const workerAssignable: MultiSelectOption[] = (me?.teamId
+    ? ownerOptions.filter((o) => !hardOwnerIds.includes(o.id) && o.teamId === me.teamId)
+    : ownerOptions.filter((o) => !hardOwnerIds.includes(o.id))
+  ).map((o) => ({ value: o.id, label: o.displayName }));
 
   React.useEffect(() => {
     if (!countryId) return;
@@ -457,6 +542,7 @@ export function CreatorFormDialog({
     const localError = validateLocal();
     if (localError) return toast({ title: localError, variant: "destructive" });
 
+    const allOwners = Array.from(new Set([...workerOwnerIds, ...hardOwnerIds]));
     const body: Record<string, unknown> = {
       name: name.trim(),
       email: email.trim() || undefined,
@@ -471,7 +557,8 @@ export function CreatorFormDialog({
       engagementRate: engagementRate ? Number(engagementRate) : undefined,
       notes: notes.trim() || undefined,
       customFields: custom,
-      ...(mode === "create" && ownerIds.length ? { ownerIds } : {}),
+      ...(mode === "create" && allOwners.length ? { ownerIds: allOwners } : {}),
+      ...(mode === "edit" && initial && initial.canEditOwners !== false ? { ownerIds: allOwners } : {}),
       ...(mode === "create" && stageId ? { stageId } : {}),
       ...(mode === "create"
         ? {
@@ -484,7 +571,8 @@ export function CreatorFormDialog({
               // Non-admin edit: send only newly-added profiles so existing ones are kept.
               profiles: profiles
                 .filter((p) => {
-                  const existingInputs = (initial.profiles ?? []).map((ep) => ep.handle ?? "").map((h) => h.toLowerCase());
+                  const existingInputs = (initial.profiles ?? [])
+                    .map((ep) => String((ep.url as string) || "").toLowerCase() || (ep.handle ?? "").toLowerCase());
                   return p.input.trim() && !existingInputs.includes(p.input.trim().toLowerCase());
                 })
                 .map((p) => ({ platform: p.platform, input: p.input.trim(), isPrimary: p.isPrimary })),
@@ -748,22 +836,42 @@ export function CreatorFormDialog({
           ) : null}
 
           {/* Assignment */}
-          {mode === "create" ? (
-            <div className="space-y-1.5">
-              <Label className="inline-flex items-center gap-1">
-                Assign to {requiredFields.some((f) => f.key === "owner") ? <span className="text-destructive">*</span> : null}
-              </Label>
-              <MultiSelect
-                options={ownerAssignable}
-                value={ownerIds}
-                onChange={(next) => {
-                  setOwnerIds(next);
-                }}
-                placeholder="Select team members…"
-              />
-              <p className="text-xs text-muted-foreground">
-                Who should work this creator. Admins and the Team Manager are always assigned (locked); multiple owners are allowed when the workspace enables it.
-              </p>
+          {mode === "create" || (mode === "edit" && initial?.canEditOwners !== false) ? (
+            <div className="space-y-4 rounded-lg border p-4">
+              <Label className="text-sm font-semibold">Assignment</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground">
+                  Auto-assigned (always owners)
+                </Label>
+                {hardOwners.length ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {hardOwners.map((o) => (
+                      <Badge key={o.id} variant="secondary" className="gap-1 font-normal">
+                        <ShieldAlert className="h-3 w-3" />
+                        {o.displayName}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Loading…</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="inline-flex items-center gap-1">
+                  Assign to{" "}
+                  {requiredFields.some((f) => f.key === "owner") ? <span className="text-destructive">*</span> : null}
+                </Label>
+                <MultiSelect
+                  options={workerAssignable}
+                  value={workerOwnerIds}
+                  onChange={setWorkerOwnerIds}
+                  placeholder="Select team members…"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Who should work this creator. You start assigned and can remove yourself or add teammates;
+                  multiple owners follow the workspace policy.
+                </p>
+              </div>
             </div>
           ) : null}
 

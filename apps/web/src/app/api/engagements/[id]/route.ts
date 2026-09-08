@@ -40,12 +40,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       where: { id },
       data: { stageId, completedAt: target.isCompleted ? new Date() : null },
     });
+    const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : "";
     await logActivity({
       creatorId: engagement.creatorId,
       kind: "SYSTEM",
       type: "STAGE_CHANGED",
       summary: `Stage moved: ${fromName} to ${target.name}`,
-      description: `${engagement.title}`,
+      description: reason ? `${engagement.title} · Reason: ${reason}` : `${engagement.title}`,
       authorId: session.id,
     });
     await logTransaction({

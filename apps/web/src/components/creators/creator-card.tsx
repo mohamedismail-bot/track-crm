@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Users, CalendarClock, Flame, ExternalLink, ChevronDown } from "lucide-react";
+import { Users, CalendarClock, Flame, ExternalLink, ChevronDown, MoreHorizontal, UserCog } from "lucide-react";
 import type { Platform } from "@prisma/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,8 @@ import {
   timeAgo,
 } from "@/lib/display";
 import { REQUIRED_FOR_GIFTING_LABELS } from "@/lib/constants";
+import { StageChangeDialog, moveStageWithReason } from "./stage-change-dialog";
+import { ReassignCreatorDialog } from "./reassign-dialog";
 
 export interface CreatorListItem {
   id: string;
@@ -113,10 +115,12 @@ export function StageDropdown({
   onStageChanged,
 }: {
   creator: CreatorListItem;
-  onStageChanged: (name: string) => void;
+  onStageChanged: (stage: { id: string; name: string }) => void;
 }) {
   const [stages, setStages] = React.useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [pending, setPending] = React.useState<{ id: string; name: string } | null>(null);
+  const [busy, setBusy] = React.useState(false);
 
   const loadStages = async () => {
     if (stages.length > 0) return;
@@ -131,43 +135,46 @@ export function StageDropdown({
     setLoading(false);
   };
 
-  const moveStage = async (targetStageId: string) => {
-    if (!creator.currentEngagementId) return;
-    try {
-      const res = await fetch(`/api/engagements/${creator.currentEngagementId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "move-stage", stageId: targetStageId }),
-      });
-      const data = await res.json();
-      if (!res.ok) return toast({ title: data.error ?? "Failed to move stage", variant: "destructive" });
-      toast({ title: `Stage moved to ${data.stageName}` });
-      onStageChanged(data.stageName);
-    } catch {
-      toast({ title: "Something went wrong", variant: "destructive" });
-    }
+  const confirmMove = async (reason: string) => {
+    if (!creator.currentEngagementId || !pending) return;
+    setBusy(true);
+    const res = await moveStageWithReason(creator.currentEngagementId, pending.id, reason);
+    setBusy(false);
+    if (!res.ok) return toast({ title: res.error ?? "Failed to move stage", variant: "destructive" });
+    toast({ title: `Stage moved to ${res.stageName}` });
+    setPending(null);
+    onStageChanged({ id: pending.id, name: res.stageName ?? pending.name });
   };
 
   return (
-    <DropdownMenu onOpenChange={(open) => open && loadStages()}>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[11px] font-medium" disabled={loading}>
-          {creator.stage?.name ?? "No stage"}
-          <ChevronDown className="h-3 w-3" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        {stages.map((s) => (
-          <DropdownMenuItem
-            key={s.id}
-            onClick={() => moveStage(s.id)}
-            className={s.id === creator.stage?.id ? "font-semibold" : ""}
-          >
-            {s.name}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu onOpenChange={(open) => open && loadStages()}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[11px] font-medium" disabled={loading}>
+            {creator.stage?.name ?? "No stage"}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-44">
+          {stages.map((s) => (
+            <DropdownMenuItem
+              key={s.id}
+              onClick={() => setPending({ id: s.id, name: s.name })}
+              className={s.id === creator.stage?.id ? "font-semibold" : ""}
+            >
+              {s.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <StageChangeDialog
+        open={pending !== null}
+        onOpenChange={(v) => !v && setPending(null)}
+        title={`Move to ${pending?.name ?? ""}`}
+        onConfirm={confirmMove}
+        busy={busy}
+      />
+    </>
   );
 }
 
@@ -179,42 +186,108 @@ function StoryRingAvatar({ name }: { name: string }) {
   );
 }
 
-export function CreatorCard({ creator }: { creator: CreatorListItem }) {
-  const [currentStage, setCurrentStage] = React.useState(creator.stage);
+export function CreatorCard({
+  creator,
+  onStageChanged,
+  selected,
+  onToggleSelect,
+  onReassigned,
+}: {
+  creator: CreatorListItem;
+  onStageChanged?: (creatorId: string, stage: { id: string; name: string } | null) => void;
+  selected?: boolean;
+  onToggleSelect?: (creatorId: string, selected: boolean) => void;
+  onReassigned?: () => void;
+}) {
+  const [currentStage, setCurrentStage] = React.useState<{ id: string; name: string } | null>(creator.stage);
+  const [reassignOpen, setReassignOpen] = React.useState(false);
   const overdue =
     creator.nextDeliverable && new Date(creator.nextDeliverable.dueDate) < new Date()
       ? true
       : false;
+  const showCheck = onToggleSelect !== undefined;
+
+  const handleStageChanged = (stage: { id: string; name: string }) => {
+    setCurrentStage(stage);
+    onStageChanged?.(creator.id, stage);
+  };
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="group relative flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40">
+      <div
+        className={`group relative flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm transition-colors ${
+          selected
+            ? "border-primary/70 ring-2 ring-primary/30"
+            : "border-border hover:border-primary/40 hover:bg-accent/40"
+        }`}
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-3">
+            {showCheck ? (
+              <button
+                type="button"
+                onClick={() => onToggleSelect?.(creator.id, !selected)}
+                aria-label={selected ? "Deselect creator" : "Select creator"}
+                className={`mt-1 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border transition-colors ${
+                  selected
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-transparent hover:border-primary/60"
+                }`}
+              >
+                {selected ? (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : null}
+              </button>
+            ) : null}
             <StoryRingAvatar name={creator.name} />
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <Link href={`/creators/${creator.id}`} className="truncate text-sm font-semibold leading-tight hover:underline">
-                  {creator.name}
-                </Link>
-                <a
-                  href={`/creators/${creator.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={(e) => e.stopPropagation()}
-                  title="Open in new tab"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
+              <Link
+                href={`/creators/${creator.id}`}
+                className="break-words text-sm font-semibold leading-tight hover:underline"
+              >
+                {creator.name}
+              </Link>
               {!creator.profiles.length ? (
-                <span className="text-xs text-muted-foreground">@{creator.handle ?? "—"}</span>
+                <span className="block text-xs text-muted-foreground">@{creator.handle ?? "—"}</span>
               ) : null}
             </div>
           </div>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <a
+              href={`/creators/${creator.id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground"
+              onClick={(e) => e.stopPropagation()}
+              title="Open in new tab"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+            {creator.canMove ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="More actions">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setReassignOpen(true)}>
+                    <UserCog className="mr-2 h-4 w-4" />
+                    Reassign owner…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <span className="w-7" />
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
           {creator.canMove && creator.currentEngagementId ? (
-            <StageDropdown creator={{ ...creator, stage: currentStage }} onStageChanged={(name) => setCurrentStage((prev) => prev ? { ...prev, name } : prev)} />
+            <StageDropdown creator={{ ...creator, stage: currentStage }} onStageChanged={handleStageChanged} />
           ) : currentStage ? (
             <Badge variant="outline" className="shrink-0">{currentStage.name}</Badge>
           ) : null}
@@ -238,9 +311,18 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
                   <path d="M15.337 23.979l7.216-1.851-4.284-15.319-10.055 2.722-.56 3.952 5.899 1.517 2.487 8.168c.146.478.253.96.32 1.443l5.273-1.356v-.276z" />
                 </svg>
               </span>
-              Shopify
+              Registered
             </Badge>
-          ) : null}
+          ) : (
+            <Badge variant="outline" className="gap-1 text-muted-foreground">
+              <span className="inline-flex h-3 w-3 items-center justify-center opacity-70">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M15.337 23.979l7.216-1.851-4.284-15.319-10.055 2.722-.56 3.952 5.899 1.517 2.487 8.168c.146.478.253.96.32 1.443l5.273-1.356v-.276z" />
+                </svg>
+              </span>
+              Not registered
+            </Badge>
+          )}
         </div>
 
         {creator.niche?.length ? (
@@ -309,9 +391,17 @@ export function CreatorCard({ creator }: { creator: CreatorListItem }) {
             <span className="text-xs text-muted-foreground">Unassigned</span>
           )}
           <span className="text-right text-[11px] leading-tight text-muted-foreground">
-            {creator.lastActivityAt ? timeAgo(creator.lastActivityAt) : "No activity"}
+            {creator.createdAt ? `Added ${timeAgo(creator.createdAt)}` : "—"}
           </span>
         </div>
+        <ReassignCreatorDialog
+          open={reassignOpen}
+          onOpenChange={setReassignOpen}
+          creatorId={creator.id}
+          creatorName={creator.name}
+          currentOwnerIds={creator.owners.map((o) => o.id)}
+          onDone={onReassigned}
+        />
       </div>
     </TooltipProvider>
   );
