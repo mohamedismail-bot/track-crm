@@ -6,7 +6,7 @@ import { notify } from "./notify";
 import { requiredForGiftingMissing, REQUIRED_FOR_GIFTING_LABELS, GIFT_STATUS_KEYS } from "./constants";
 import { giftStatusId, giftProductName } from "./gift-status";
 import type { SessionUser } from "./auth";
-import { DealType, DeliverableStatus, GiftApprovalRole } from "@prisma/client";
+import { DealType, DeliverableStatus, GiftApprovalRole, CreditTransactionType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
 export interface GiftRequestResult {
@@ -372,6 +372,48 @@ async function nextStatusAfter(current: { id: string }) {
   return all[idx + 1] ?? null;
 }
 
+/**
+ * Phase 6 — post the single +credit for a delivered order to its requester's
+ * CreditAccount, inside the caller's transaction. Idempotent per order: never
+ * posts twice, guarded by an existing CREDIT row with the same Gift ref.
+ */
+async function postGiftCredit(
+  tx: Prisma.TransactionClient,
+  gift: {
+    id: string;
+    orderNumber: number;
+    orderTotal: number;
+    currency: string;
+    requestedById: string;
+    creatorId: string;
+  },
+): Promise<number> {
+  const account = await tx.creditAccount.upsert({
+    where: { userId: gift.requestedById },
+    update: {},
+    create: { userId: gift.requestedById },
+  });
+  const prior = await tx.creditTransaction.findFirst({
+    where: { accountId: account.id, refType: "Gift", refId: gift.id, type: CreditTransactionType.CREDIT },
+  });
+  if (prior) return 0;
+  await tx.creditTransaction.create({
+    data: {
+      accountId: account.id,
+      amount: gift.orderTotal,
+      type: CreditTransactionType.CREDIT,
+      reason: `Gift order #${gift.orderNumber} delivered`,
+      refType: "Gift",
+      refId: gift.id,
+    },
+  });
+  await tx.creditAccount.update({
+    where: { id: account.id },
+    data: { balance: { increment: gift.orderTotal } },
+  });
+  return 1;
+}
+
 /** The status flagged isDraft (reject target), else null. */
 async function draftStatusRow() {
   return prisma.giftStatus.findFirst({ where: { isDraft: true }, orderBy: { position: "asc" } });
@@ -553,6 +595,7 @@ export async function warehouseUpdateGift(
       status: true,
       lines: { orderBy: { id: "asc" } },
       engagement: { include: { creator: true } },
+      requestedBy: true,
     },
   });
   if (!gift) return { ok: false, message: "Gift not found." };
@@ -594,17 +637,49 @@ export async function warehouseUpdateGift(
     }
     const next = await nextStatusAfter(gift.status);
     if (!next) return { ok: false, message: "This order is already at its final status." };
-    await prisma.gift.update({
-      where: { id: giftId },
-      data: { statusId: next.id, deliveredAt: new Date() },
-    });
-    await logActivity({
-      creatorId: gift.engagement.creatorId,
-      kind: "SYSTEM",
-      type: "GIFT_DELIVERED",
-      summary: "Gift delivered",
-      description: name,
-      authorId: user.id,
+    const settings = await getSettings();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.gift.update({
+        where: { id: giftId },
+        data: { statusId: next.id, deliveredAt: new Date() },
+      });
+      await tx.activityLog.create({
+        data: {
+          creatorId: gift.engagement.creatorId,
+          kind: "SYSTEM",
+          type: "GIFT_DELIVERED",
+          summary: "Gift delivered",
+          description: name,
+          authorId: user.id,
+        },
+      });
+      // Entering a grantCredit status posts the +credit for this order (once).
+      if (next.grantCredit && settings.creditEnabled) {
+        const posted = await postGiftCredit(
+          tx,
+          {
+            id: gift.id,
+            orderNumber: gift.orderNumber,
+            orderTotal: gift.orderTotal,
+            currency: gift.currency,
+            requestedById: gift.requestedById,
+            creatorId: gift.engagement.creatorId,
+          },
+        );
+        if (posted > 0) {
+          await tx.activityLog.create({
+            data: {
+              creatorId: gift.engagement.creatorId,
+              kind: "SYSTEM",
+              type: "GIFT_CREDIT_POSTED",
+              summary: "Credit posted to credit account",
+              description: `Gift order #${gift.orderNumber} delivered — ${gift.orderTotal.toLocaleString()} ${gift.currency} credited to ${gift.requestedBy?.displayName ?? "requester"}`,
+              authorId: user.id,
+            },
+          });
+        }
+      }
     });
     await notify({
       userId: gift.requestedById,

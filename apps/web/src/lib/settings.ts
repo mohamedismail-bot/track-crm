@@ -14,6 +14,8 @@ export interface WorkspaceSettings {
   giftMonthlyCapEnabled: boolean;
   giftRequirePreviousDeliverable: boolean;
   giftMinStageId: string | null;
+  creditEnabled: boolean;
+  deliverableApprovalRequired: boolean;
   shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
   exportEnabledUserIds: string[];
@@ -44,6 +46,8 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     giftMonthlyCapEnabled: all[SETTING_KEYS.GIFT_MONTHLY_CAP] !== "false",
     giftRequirePreviousDeliverable: all[SETTING_KEYS.GIFT_REQUIRE_PREV_DELIVERABLE] !== "false",
     giftMinStageId: all[SETTING_KEYS.GIFT_MIN_STAGE_ID] || null,
+    creditEnabled: all[SETTING_KEYS.CREDIT_ENABLED] !== "false",
+    deliverableApprovalRequired: all[SETTING_KEYS.DELIVERABLE_APPROVAL_REQUIRED] !== "false",
     shopifyMinStageId: all[SETTING_KEYS.SHOPIFY_MIN_STAGE_ID] || null,
     exportEnabledRoles: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_ROLES]),
     exportEnabledUserIds: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_USER_IDS]),

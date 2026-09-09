@@ -40,6 +40,7 @@ interface QueueGift {
   exceptionReason: string | null;
   shippingAddress: string | null;
   shippingLabel?: string;
+  orderNumber: number;
   orderTotal: number;
   currency: string;
   lines: { id: string; productName: string; unitCost: number; quantity: number; lineTotal: number }[];
@@ -48,6 +49,8 @@ interface QueueGift {
   requestedAt: string;
   creatorId: string;
   creatorName: string;
+  creatorPhone: string | null;
+  creatorCity: string | null;
   engagementId: string;
   engagementTitle: string;
   teamName: string;
@@ -325,6 +328,46 @@ function DispatchCard({
               {gift.creatorName} · {gift.engagementTitle} · {gift.teamName}
             </p>
           </div>
+          <a
+            href={`/gifting/${gift.id}/label`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-9 shrink-0 items-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            Print label
+          </a>
+        </div>
+
+        <div className="mt-3 rounded-lg border bg-muted/30 p-3 text-sm">
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Ship to</p>
+              <p className="mt-0.5 font-medium">{gift.creatorName}</p>
+              <p className="text-muted-foreground">
+                {gift.creatorPhone ?? "No phone"} · {gift.creatorCity ?? "No city"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Order</p>
+              <p className="mt-0.5 font-medium">#{gift.orderNumber}</p>
+              <p className="text-muted-foreground">
+                {gift.lines.reduce((s, l) => s + l.quantity, 0)} item
+                {gift.lines.reduce((s, l) => s + l.quantity, 0) === 1 ? "" : "s"} ·{" "}
+                {gift.orderTotal.toLocaleString()} {gift.currency}
+              </p>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{gift.shippingAddress ?? "No shipping address on file"}</p>
+          <ul className="mt-2 space-y-1 border-t pt-2">
+            {gift.lines.map((l) => (
+              <li key={l.id} className="flex flex-wrap items-baseline justify-between gap-x-6 text-sm">
+                <span className="font-medium">{l.productName}</span>
+                <span className="text-muted-foreground">
+                  × {l.quantity} · {l.unitCost.toLocaleString()} each · {l.lineTotal.toLocaleString()} {gift.currency}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
         {canFulfill ? (
           dispatched ? (

@@ -1,6 +1,6 @@
 # PLAN — Full-Cycle Gift Order, Deliverables, Credit & Logistics
 
-**Status: Building. Phases 1–5 shipped (schema+status engine, catalog, order form, approval+deliverable spawn). Remaining: warehouse label, credit ledger, notifications/dashboard/reports.**
+**Status: Building. Phases 1–6 shipped (schema+status engine, catalog, order form, approval+deliverable spawn, warehouse label + credit-on-deliver). Remaining: debit on final approval, Credit page, notifications/dashboard/reports.**
 
 Refactors the current simple "Request Gift" (engagement + product-name string) into a full **Gift Order** lifecycle: multi-line product orders, agreement (budget/commission + deliverables), configurable approval chain, warehouse shipping labels, and a per-user **Credit Account** ledger.
 
@@ -123,7 +123,7 @@ Hard-stop checks run on submit (unchanged, in `lib/gifts.ts`):
 3. ~~**Catalog**~~ ✅ — models + Admin CRUD API + Settings card + demo seed (round 8).
 4. ~~**Order form**~~ ✅ — Agreement + product grid + shipping + draft/submit; `requestGift` reworked (all orders → first status; exception flag). `Gift.agreement` JSON holds the deliverables pending spawn (round 9).
 5. ~~**Approval + deliverable spawn**~~ ✅ — approve/reject advance by `position` in `resolveGiftRequest`; transaction + idempotent `spawnGiftDeliverables` materializes `Gift.agreement` into `Deliverable` rows tagged `giftId` (status `PENDING`) on entering a `spawnDeliverables` status; reject returns to `isDraft` row with reason; `warehouseUpdateGift` uses the same next-position moves (round 10).
-6. **Warehouse** — DispatchCard label panel + ship/deliver + print label; deliver posts credit.
+6. ~~**Warehouse**~~ ✅ — DispatchCard label panel (ship-to, order #, lines × qty/unit/line totals, order total) + carrier/tracking dispatch + deliver posting the single +credit to the requester's CreditAccount in the same transaction as the status change; standalone print-only label route `/gifting/[id]/label` with a Print button; `credit.enabled` + `deliverable.approvalRequired` settings introduced (round 11).
 7. **Credit ledger** — accounts, debit on final approval, transaction, `credit.view` routes, Credit page + chip + Settings toggles.
 8. **Notifications + dashboard + reports** — wiring and new insights.
 

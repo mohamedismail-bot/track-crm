@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     include: {
       status: true,
       lines: { orderBy: { id: "asc" } },
-      engagement: { include: { creator: true, team: true, deliverables: true } },
+      engagement: { include: { creator: { include: { cityRef: true } }, team: true, deliverables: true } },
       requestedBy: true,
       approvedBy: true,
     },
@@ -74,6 +74,8 @@ export async function GET(req: NextRequest) {
       deliveredAt: g.deliveredAt,
       creatorId: g.engagement.creatorId,
       creatorName: g.engagement.creator.name,
+      creatorPhone: g.engagement.creator.phone,
+      creatorCity: g.engagement.creator.cityRef?.name ?? g.engagement.creator.city,
       engagementId: g.engagementId,
       engagementTitle: g.engagement.title,
       teamName: g.engagement.team.name,
