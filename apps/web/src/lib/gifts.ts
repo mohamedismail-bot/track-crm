@@ -7,6 +7,7 @@ import { requiredForGiftingMissing, REQUIRED_FOR_GIFTING_LABELS, GIFT_STATUS_KEY
 import { giftStatusId, giftProductName } from "./gift-status";
 import type { SessionUser } from "./auth";
 import { DealType, DeliverableStatus, GiftApprovalRole } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 export interface GiftRequestResult {
   ok: boolean;
@@ -363,6 +364,67 @@ export async function requestGift(
   return { ok: true, status: (await prisma.giftStatus.findUnique({ where: { id: gift.statusId } }))?.key ?? "", message: isException ? "Gift order sent for exception approval." : "Gift order submitted for approval.", giftId: gift.id };
 }
 
+/** The status row one position after `current`, or null when it is the last row. */
+async function nextStatusAfter(current: { id: string }) {
+  const all = await prisma.giftStatus.findMany({ orderBy: { position: "asc" } });
+  const idx = all.findIndex((s) => s.id === current.id);
+  if (idx < 0) return null;
+  return all[idx + 1] ?? null;
+}
+
+/** The status flagged isDraft (reject target), else null. */
+async function draftStatusRow() {
+  return prisma.giftStatus.findFirst({ where: { isDraft: true }, orderBy: { position: "asc" } });
+}
+
+/**
+ * Phase 5 — enter a status with spawnDeliverables: materialize the order's
+ * Agreement deliverables as real Deliverable records (tagged giftId, PENDING),
+ * in the caller's transaction. Idempotent per order (never posts twice).
+ */
+async function spawnGiftDeliverables(
+  tx: Prisma.TransactionClient,
+  gift: {
+    id: string;
+    orderNumber: number;
+    engagementId: string;
+    creatorId: string;
+    agreement: unknown;
+  },
+  actorId: string,
+): Promise<number> {
+  const agreement = Array.isArray(gift.agreement) ? (gift.agreement as { title?: string; type?: string; dueDate?: string }[]) : [];
+  if (agreement.length === 0) return 0;
+  const alreadySpawned = await tx.deliverable.count({ where: { giftId: gift.id } });
+  if (alreadySpawned > 0) return 0;
+
+  const rows = agreement
+    .filter((d): d is { title: string; type?: string; dueDate: string } => !!d.title?.trim() && !!d.dueDate)
+    .map((d) => ({
+      engagementId: gift.engagementId,
+      giftId: gift.id,
+      title: d.title!.trim(),
+      type: d.type?.trim() || "Video",
+      dueDate: new Date(d.dueDate),
+    }));
+  if (rows.length === 0) return 0;
+
+  const { count } = await tx.deliverable.createMany({ data: rows });
+  if (count > 0) {
+    await tx.activityLog.create({
+      data: {
+        creatorId: gift.creatorId,
+        kind: "SYSTEM",
+        type: "GIFT_APPROVED",
+        summary: `Deliverables created for gift order #${gift.orderNumber}`,
+        description: `${count} deliverable${count === 1 ? "" : "s"} added to the engagement from the order agreement`,
+        authorId: actorId,
+      },
+    });
+  }
+  return count;
+}
+
 export async function resolveGiftRequest(
   user: SessionUser,
   giftId: string,
@@ -380,28 +442,49 @@ export async function resolveGiftRequest(
   if (!gift) return { ok: false, message: "Gift not found." };
   if (gift.engagement.teamId !== user.teamId) return { ok: false, message: "Not your team's gift." };
   if (!user.permissions.includes("gift.approve")) return { ok: false, message: "No permission to approve gifts." };
-  if (gift.status.key !== GIFT_STATUS_KEYS.PENDING_MANAGER) return { ok: false, message: "Gift is not pending approval." };
 
   const name = giftProductName(gift);
 
+  if (gift.status.approvalRole === GiftApprovalRole.NONE) {
+    return { ok: false, message: "Gift is not pending approval." };
+  }
+  if (gift.status.approvalRole === GiftApprovalRole.ADMIN && user.roleSlug !== "admin") {
+    return { ok: false, message: "This step requires admin approval." };
+  }
+
   if (decision === "approve") {
-    const statusId = await giftStatusId(GIFT_STATUS_KEYS.APPROVED);
-    await prisma.gift.update({
-      where: { id: giftId },
-      data: {
-        statusId,
-        approvedById: user.id,
-        approvedAt: new Date(),
-      },
+    const next = await nextStatusAfter(gift.status);
+    if (!next) return { ok: false, message: "This order is already at its final status." };
+
+    let spawned = 0;
+    await prisma.$transaction(async (tx) => {
+      await tx.gift.update({
+        where: { id: giftId },
+        data: { statusId: next.id, approvedById: user.id, approvedAt: new Date() },
+      });
+      spawned = await spawnGiftDeliverables(
+        tx,
+        {
+          id: gift.id,
+          orderNumber: gift.orderNumber,
+          engagementId: gift.engagementId,
+          creatorId: gift.engagement.creatorId,
+          agreement: gift.agreement,
+        },
+        user.id,
+      );
+      await tx.activityLog.create({
+        data: {
+          creatorId: gift.engagement.creatorId,
+          kind: "SYSTEM",
+          type: "GIFT_APPROVED",
+          summary: "Gift approved",
+          description: name,
+          authorId: user.id,
+        },
+      });
     });
-    await logActivity({
-      creatorId: gift.engagement.creatorId,
-      kind: "SYSTEM",
-      type: "GIFT_APPROVED",
-      summary: "Gift exception approved",
-      description: name,
-      authorId: user.id,
-    });
+
     await notify({
       userId: gift.requestedById,
       type: "GIFT_APPROVED",
@@ -409,38 +492,53 @@ export async function resolveGiftRequest(
       body: `${name} for ${gift.engagement.creator.name}`,
       link: "/gifting",
     });
-  } else {
-    const statusId = await giftStatusId(GIFT_STATUS_KEYS.REJECTED);
-    await prisma.gift.update({
-      where: { id: giftId },
-      data: { statusId, exceptionReason: reason },
+    await logTransaction({
+      userId: user.id,
+      action: "gift.approve",
+      entityType: "Gift",
+      entityId: giftId,
+      detail: `Approved ${name} — moved to "${next.label}"`,
     });
-    await logActivity({
-      creatorId: gift.engagement.creatorId,
-      kind: "SYSTEM",
-      type: "GIFT_REJECTED",
-      summary: "Gift exception rejected",
-      description: reason ?? name,
-      authorId: user.id,
-    });
-    await notify({
-      userId: gift.requestedById,
-      type: "GIFT_REJECTED",
-      title: "Gift exception rejected",
-      body: reason ?? name,
-      link: "/gifting",
-    });
+    return { ok: true, message: spawned > 0 ? `Gift approved and ${spawned} deliverable(s) created.` : "Gift approved." };
   }
 
-  await logTransaction({
-    userId: user.id,
-    action: decision === "approve" ? "gift.approve" : "gift.reject",
-    entityType: "Gift",
-    entityId: giftId,
-    detail: `Decision ${decision} for ${name}`,
+  // Reject: return the order to the configured Draft status (resumable).
+  const draftRow = await draftStatusRow();
+  if (!draftRow) return { ok: false, message: "No draft status is configured for this workspace." };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.gift.update({
+      where: { id: giftId },
+      data: { statusId: draftRow.id, exceptionReason: reason ?? null },
+    });
+    await tx.activityLog.create({
+      data: {
+        creatorId: gift.engagement.creatorId,
+        kind: "SYSTEM",
+        type: "GIFT_REJECTED",
+        summary: "Gift order sent back to draft",
+        description: `${reason ? `Reason: ${reason} · ` : ""}${name}`,
+        authorId: user.id,
+      },
+    });
   });
 
-  return { ok: true, message: decision === "approve" ? "Gift approved." : "Gift rejected." };
+  await notify({
+    userId: gift.requestedById,
+    type: "GIFT_REJECTED",
+    title: "Gift order sent back to draft",
+    body: reason ?? name,
+    link: "/gifting",
+  });
+  await logTransaction({
+    userId: user.id,
+    action: "gift.reject",
+    entityType: "Gift",
+    entityId: giftId,
+    detail: `Rejected ${name} — returned to "${draftRow.label}"`,
+  });
+
+  return { ok: true, message: "Gift order returned to draft." };
 }
 
 export async function warehouseUpdateGift(
@@ -462,13 +560,13 @@ export async function warehouseUpdateGift(
   const name = giftProductName(gift);
 
   if (input.action === "dispatch") {
-    if (gift.status.key !== GIFT_STATUS_KEYS.APPROVED) return { ok: false, message: "Gift must be approved before dispatch." };
     if (!input.trackingNumber?.trim()) return { ok: false, message: "Tracking number required." };
-    const statusId = await giftStatusId(GIFT_STATUS_KEYS.SHIPPED);
+    const next = await nextStatusAfter(gift.status);
+    if (!next || !next.warehouseStep) return { ok: false, message: "This order is not ready to be dispatched." };
     await prisma.gift.update({
       where: { id: giftId },
       data: {
-        statusId,
+        statusId: next.id,
         trackingNumber: input.trackingNumber.trim(),
         carrier: input.carrier,
         dispatchedAt: new Date(),
@@ -490,11 +588,15 @@ export async function warehouseUpdateGift(
       link: "/gifting",
     });
   } else {
-    if (gift.status.key !== GIFT_STATUS_KEYS.SHIPPED) return { ok: false, message: "Gift must be dispatched before delivery." };
-    const statusId = await giftStatusId(GIFT_STATUS_KEYS.DELIVERED);
+    // Deliver: from a dispatched warehouse step into the next position.
+    if (!gift.status.warehouseStep || !gift.trackingNumber) {
+      return { ok: false, message: "Order must be dispatched before marking delivered." };
+    }
+    const next = await nextStatusAfter(gift.status);
+    if (!next) return { ok: false, message: "This order is already at its final status." };
     await prisma.gift.update({
       where: { id: giftId },
-      data: { statusId, deliveredAt: new Date() },
+      data: { statusId: next.id, deliveredAt: new Date() },
     });
     await logActivity({
       creatorId: gift.engagement.creatorId,
