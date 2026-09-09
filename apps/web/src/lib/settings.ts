@@ -16,6 +16,8 @@ export interface WorkspaceSettings {
   giftMinStageId: string | null;
   creditEnabled: boolean;
   deliverableApprovalRequired: boolean;
+  currencyCode: string;
+  currencySymbol: string;
   shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
   exportEnabledUserIds: string[];
@@ -48,6 +50,8 @@ export async function getSettings(): Promise<WorkspaceSettings> {
     giftMinStageId: all[SETTING_KEYS.GIFT_MIN_STAGE_ID] || null,
     creditEnabled: all[SETTING_KEYS.CREDIT_ENABLED] !== "false",
     deliverableApprovalRequired: all[SETTING_KEYS.DELIVERABLE_APPROVAL_REQUIRED] !== "false",
+    currencyCode: all[SETTING_KEYS.WORKSPACE_CURRENCY_CODE] || "EGP",
+    currencySymbol: all[SETTING_KEYS.WORKSPACE_CURRENCY_SYMBOL] || "EGP",
     shopifyMinStageId: all[SETTING_KEYS.SHOPIFY_MIN_STAGE_ID] || null,
     exportEnabledRoles: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_ROLES]),
     exportEnabledUserIds: jsonArray(all[SETTING_KEYS.EXPORT_ENABLED_USER_IDS]),

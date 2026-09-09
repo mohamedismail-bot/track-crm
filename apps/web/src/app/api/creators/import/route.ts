@@ -313,7 +313,7 @@ export async function POST(req: NextRequest) {
           await tx.creator.update({ where: { id: c.id }, data: { primaryProfileId: primary.id } });
         }
         return c;
-      });
+      }, { timeout: 30000 });
 
       const profileSummary = finalProfiles.map((p) => `@${p.handle}`).join(", ");
       await logActivity({

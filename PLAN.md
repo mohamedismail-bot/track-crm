@@ -1,6 +1,6 @@
 # PLAN — Full-Cycle Gift Order, Deliverables, Credit & Logistics
 
-**Status: Building. Phases 1–6 shipped (schema+status engine, catalog, order form, approval+deliverable spawn, warehouse label + credit-on-deliver). Remaining: debit on final approval, Credit page, notifications/dashboard/reports.**
+**Status: Building. Phases 1–7 shipped (schema+status engine, catalog, order form, approval+deliverable spawn, warehouse label + credit-on-deliver, credit ledger). Remaining: notifications/dashboard/reports.**
 
 Refactors the current simple "Request Gift" (engagement + product-name string) into a full **Gift Order** lifecycle: multi-line product orders, agreement (budget/commission + deliverables), configurable approval chain, warehouse shipping labels, and a per-user **Credit Account** ledger.
 

@@ -103,6 +103,20 @@ export async function PUT(req: NextRequest) {
     }
     entries[SETTING_KEYS.GIFT_MIN_STAGE_ID] = stageId === "none" ? "" : stageId;
   }
+  if (body.creditEnabled !== undefined)
+    entries[SETTING_KEYS.CREDIT_ENABLED] = body.creditEnabled ? "true" : "false";
+  if (body.deliverableApprovalRequired !== undefined)
+    entries[SETTING_KEYS.DELIVERABLE_APPROVAL_REQUIRED] = body.deliverableApprovalRequired ? "true" : "false";
+  if (body.currencyCode !== undefined) {
+    const code = String(body.currencyCode).trim().toUpperCase();
+    if (!code || code.length > 8) return jsonError("Invalid currency code.", 400);
+    entries[SETTING_KEYS.WORKSPACE_CURRENCY_CODE] = code;
+  }
+  if (body.currencySymbol !== undefined) {
+    const symbol = String(body.currencySymbol).trim().slice(0, 12);
+    if (!symbol) return jsonError("Invalid currency symbol.", 400);
+    entries[SETTING_KEYS.WORKSPACE_CURRENCY_SYMBOL] = symbol;
+  }
   if (body.shopifyMinStageId !== undefined) {
     const stageId = String(body.shopifyMinStageId ?? "");
     if (stageId && stageId !== "none") {

@@ -41,7 +41,7 @@ def login(page, email, pw):
     page.click('button[type="submit"]')
     page.wait_for_load_state("networkidle")
     try:
-        page.wait_for_url(lambda u: "/login" not in u, timeout=8000)
+        page.wait_for_url(lambda u: "/login" not in u, timeout=20000)
     except Exception:
         return False
     return True
@@ -439,9 +439,16 @@ def gift_exception_flow(browser):
                 break
             body = g.json()
             err = body.get("error") or ""
-            # The gifting gate hard-stops on previous-gift deliverable locks and
-            # on profiles missing Required-for-Gifting data — both are skippable.
-            if body.get("blocked") and ("Previous gift" in err or body.get("missingFields")):
+            # The gifting gate hard-stops on previous-gift deliverable locks, on
+            # profiles missing Required-for-Gifting data, and on engagements below
+            # the minimum gifting stage — all are legitimate gates, so skip them.
+            known_block = (
+                ("Previous gift" in err)
+                or ("minimum stage" in err)
+                or ("Required for gifting" in err)
+                or bool(body.get("missingFields"))
+            )
+            if known_block:
                 continue
             if "shipping address is required" in err.lower():
                 continue

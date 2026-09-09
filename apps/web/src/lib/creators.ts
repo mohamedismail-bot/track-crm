@@ -614,7 +614,7 @@ export async function createCreator(input: CreateCreatorInput, user: SessionUser
       await tx.creator.update({ where: { id: creator.id }, data: { primaryProfileId: primary.id } });
     }
     return { creator, profiles };
-  });
+  }, { timeout: 30000 });
 
   const profileSummary = created.profiles.map((p) => `@${p.handle}`).join(", ");
   await logActivity({

@@ -8,6 +8,7 @@ import {
   Bell,
   UserCog,
   Inbox,
+  Wallet,
 } from "lucide-react";
 
 export type NavItem = {
@@ -22,6 +23,7 @@ export function buildNavItems(opts: {
   canViewTransactions: boolean;
   canManageUsers: boolean;
   canApproveRequests: boolean;
+  canViewCredit: boolean;
 }): NavItem[] {
   const items: NavItem[] = [
     {
@@ -45,6 +47,13 @@ export function buildNavItems(opts: {
       icon: <Bell className="h-4 w-4" />,
     },
   ];
+  if (opts.canViewCredit) {
+    items.push({
+      href: "/credit",
+      label: "Credit",
+      icon: <Wallet className="h-4 w-4" />,
+    });
+  }
   if (opts.canApproveRequests) {
     items.push({
       href: "/requests",

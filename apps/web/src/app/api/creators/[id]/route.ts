@@ -366,7 +366,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
       }
       return updated;
-    });
+    }, { timeout: 30000 });
 
     let ownershipChangedAfter: string[] | null = null;
     if (body.ownerIds !== undefined) {

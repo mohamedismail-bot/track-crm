@@ -21,6 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     canViewTransactions: user.permissions.includes(PERMISSIONS.TRANSACTION_LOG_VIEW),
     canManageUsers: user.permissions.includes(PERMISSIONS.USER_MANAGE),
     canApproveRequests: user.permissions.includes(PERMISSIONS.REQUEST_APPROVE),
+    canViewCredit: user.permissions.includes(PERMISSIONS.CREDIT_VIEW),
   });
 
   return (
@@ -34,7 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         teamName={user.teamName}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar unreadCount={unreadCount} />
+        <Topbar unreadCount={unreadCount} creditEnabled={settings.creditEnabled} />
         <main className="flex-1 overflow-x-hidden p-6">{children}</main>
       </div>
     </div>

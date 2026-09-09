@@ -72,7 +72,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         where: { id },
         data: { status: "APPROVED", releasedById: session.id, resolvedAt: new Date() },
       });
-    });
+    }, { timeout: 30000 });
 
     await notify({
       userId: request.requester.id,

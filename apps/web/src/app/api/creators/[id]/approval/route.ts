@@ -58,7 +58,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
     });
     return row;
-  });
+  }, { timeout: 30000 });
 
   await logActivity({
     creatorId: id,

@@ -17,8 +17,9 @@ import {
 import { initials } from "@/lib/display";
 import { logoutAction } from "@/app/(auth)/login/actions";
 import { SearchBox } from "./search";
+import { CreditChip } from "./credit-chip";
 
-export function Topbar({ unreadCount: initialUnread }: { unreadCount: number }) {
+export function Topbar({ unreadCount: initialUnread, creditEnabled }: { unreadCount: number; creditEnabled: boolean }) {
   const { resolvedTheme, setTheme } = useTheme();
   const [unreadCount, setUnreadCount] = React.useState(initialUnread);
   const [user, setUser] = React.useState<{
@@ -53,6 +54,7 @@ export function Topbar({ unreadCount: initialUnread }: { unreadCount: number }) 
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm">
       <SearchBox />
       <div className="ml-auto flex items-center gap-1.5">
+        <CreditChip creditEnabled={creditEnabled} />
         <Button
           variant="ghost"
           size="icon"

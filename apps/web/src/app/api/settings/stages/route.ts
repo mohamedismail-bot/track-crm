@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       }
     }
     return created;
-  });
+  }, { timeout: 30000 });
 
   return NextResponse.json({ id: stage.id, name: stage.name, order: stage.order }, { status: 201 });
 }

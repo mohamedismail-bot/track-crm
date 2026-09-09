@@ -1,7 +1,9 @@
 import "server-only";
 import { prisma } from "./prisma";
+import { getSettings } from "./settings";
 import { logActivity, logTransaction } from "./activity";
 import { notify } from "./notify";
+import { postGiftDebit } from "./gifts";
 import { type SessionUser } from "./auth";
 import { DeliverableStatus } from "@prisma/client";
 
@@ -31,6 +33,52 @@ export async function submitDeliverable(
   const url = input.postedUrl.trim();
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     return { ok: false, message: "Enter a valid link (must start with http:// or https://)." };
+  }
+
+  const settings = await getSettings();
+
+  // When the workspace requires manager verification, submission lands the
+  // deliverable in UNDER_REVIEW and pings the managers. When it doesn't,
+  // posting the video IS the fulfillment point: it approves directly (and may
+  // settle a Gift ledger), with no manager notification.
+  const autoApprove = !settings.deliverableApprovalRequired;
+
+  if (autoApprove) {
+    await prisma.$transaction(async (tx) => {
+      await tx.deliverable.update({
+        where: { id: deliverableId },
+        data: {
+          status: DeliverableStatus.APPROVED,
+          postedUrl: url,
+          postedDate: new Date(input.postedDate),
+          submittedById: user.id,
+          submittedAt: new Date(),
+          reviewedById: user.id,
+        },
+      });
+      await tx.activityLog.create({
+        data: {
+          creatorId: del.engagement.creatorId,
+          kind: "SYSTEM",
+          type: "DELIVERABLE_SUBMITTED",
+          summary: `Deliverable submitted: ${del.title}`,
+          description: url,
+          authorId: user.id,
+        },
+      });
+      if (del.giftId && settings.creditEnabled) {
+        await postGiftDebit(tx, del.giftId, user.id, del.engagement.creatorId);
+      }
+    }, { timeout: 30000 });
+    await checkEngagementCompletion(del.engagementId, del.engagement.creatorId);
+    await logTransaction({
+      userId: user.id,
+      action: "deliverable.submit",
+      entityType: "Deliverable",
+      entityId: deliverableId,
+      detail: `Submitted ${del.title}`,
+    });
+    return { ok: true, message: "Deliverable marked as delivered." };
   }
 
   await prisma.deliverable.update({
@@ -98,18 +146,28 @@ export async function reviewDeliverable(
   }
 
   if (decision === "approve") {
-    await prisma.deliverable.update({
-      where: { id: deliverableId },
-      data: { status: DeliverableStatus.APPROVED, reviewedById: user.id, reviewComment: comment },
-    });
-    await logActivity({
-      creatorId: del.engagement.creatorId,
-      kind: "SYSTEM",
-      type: "DELIVERABLE_APPROVED",
-      summary: `Deliverable approved: ${del.title}`,
-      description: comment,
-      authorId: user.id,
-    });
+    const settings = await getSettings();
+    await prisma.$transaction(async (tx) => {
+      await tx.deliverable.update({
+        where: { id: deliverableId },
+        data: { status: DeliverableStatus.APPROVED, reviewedById: user.id, reviewComment: comment },
+      });
+      await tx.activityLog.create({
+        data: {
+          creatorId: del.engagement.creatorId,
+          kind: "SYSTEM",
+          type: "DELIVERABLE_APPROVED",
+          summary: `Deliverable approved: ${del.title}`,
+          description: comment,
+          authorId: user.id,
+        },
+      });
+      // Approving the final required deliverable of a gift order settles the
+      // ledger: a single −debit equal to the order total (credit must be on).
+      if (del.giftId && settings.creditEnabled) {
+        await postGiftDebit(tx, del.giftId, user.id, del.engagement.creatorId);
+      }
+    }, { timeout: 30000 });
     if (del.submittedById) {
       await notify({
         userId: del.submittedById,

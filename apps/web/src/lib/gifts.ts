@@ -59,6 +59,19 @@ export async function countCreatorGiftsThisMonth(creatorId: string, when = new D
   });
 }
 
+/** Deliverables that count as "required" toward a gift order, by deal type:
+ *  Commission/Barter count only video-style deliverables; Fixed Budget counts all. */
+function requiredGiftDeliverables<T extends { type: string; status: DeliverableStatus }>(
+  dealType: DealType,
+  deliverables: T[],
+): T[] {
+  if (dealType === DealType.COMMISSION || dealType === DealType.BARTER) {
+    const wanted = ["video", "tiktok", "reel"];
+    return deliverables.filter((d) => wanted.some((k) => d.type.toLowerCase().includes(k)));
+  }
+  return deliverables;
+}
+
 /**
  * Hard stop: a new gift cannot be requested until the deliverable required by the
  * most recent previous gift is Approved.
@@ -80,13 +93,8 @@ export async function getLastGiftLockingDeliverable(creatorId: string): Promise<
   const last = incidents[0];
   if (!last) return { blockedBy: null };
 
-  const dels = last.engagement.deliverables;
-  if (dels.length === 0) return { blockedBy: null };
-
-  const required =
-    last.engagement.dealType === DealType.COMMISSION || last.engagement.dealType === DealType.BARTER
-      ? dels.filter((d) => d.type.toLowerCase().includes("video") || d.type.toLowerCase().includes("tiktok") || d.type.toLowerCase().includes("reel"))
-      : dels;
+  const required = requiredGiftDeliverables(last.engagement.dealType, last.engagement.deliverables);
+  if (required.length === 0) return { blockedBy: null };
 
   const pending = required.filter((d) => d.status !== DeliverableStatus.APPROVED);
   if (pending.length === 0) return { blockedBy: null };
@@ -331,7 +339,7 @@ export async function requestGift(
       },
     });
     return created;
-  });
+  }, { timeout: 30000 });
 
   await logTransaction({
     userId: user.id,
@@ -410,6 +418,76 @@ async function postGiftCredit(
   await tx.creditAccount.update({
     where: { id: account.id },
     data: { balance: { increment: gift.orderTotal } },
+  });
+  return 1;
+}
+
+/**
+ * Phase 7 — post the single −debit when ALL required deliverables of a gift
+ * order are Approved, into the caller's transaction (so it sees the just-made
+ * approval). Idempotent per order: never posts twice, guarded by an existing
+ * DEBIT row referencing any of the order's spawned deliverables. Called from
+ * the deliverable flow only when credit is enabled; a workspace with credit
+ * disabled never writes the ledger.
+ */
+export async function postGiftDebit(
+  tx: Prisma.TransactionClient,
+  giftId: string,
+  actorId: string,
+  creatorId: string,
+): Promise<number> {
+  const gift = await tx.gift.findUnique({ where: { id: giftId } });
+  if (!gift || !gift.requestedById) return 0;
+  const engagement = await tx.engagement.findUnique({
+    where: { id: gift.engagementId },
+    select: { dealType: true },
+  });
+  if (!engagement) return 0;
+
+  const dels = await tx.deliverable.findMany({ where: { giftId: gift.id }, orderBy: { createdAt: "asc" } });
+  if (dels.length === 0) return 0;
+  const required = requiredGiftDeliverables(engagement.dealType, dels);
+  if (required.length === 0 || required.some((d) => d.status !== DeliverableStatus.APPROVED)) return 0;
+
+  const account = await tx.creditAccount.upsert({
+    where: { userId: gift.requestedById },
+    update: {},
+    create: { userId: gift.requestedById },
+  });
+  const prior = await tx.creditTransaction.findFirst({
+    where: {
+      accountId: account.id,
+      type: CreditTransactionType.DEBIT,
+      refType: "Deliverable",
+      refId: { in: dels.map((d) => d.id) },
+    },
+  });
+  if (prior) return 0;
+
+  const finalDeliverable = required[required.length - 1];
+  await tx.creditTransaction.create({
+    data: {
+      accountId: account.id,
+      amount: gift.orderTotal,
+      type: CreditTransactionType.DEBIT,
+      reason: `Deliverables approved for gift order #${gift.orderNumber}`,
+      refType: "Deliverable",
+      refId: finalDeliverable.id,
+    },
+  });
+  await tx.creditAccount.update({
+    where: { id: account.id },
+    data: { balance: { decrement: gift.orderTotal } },
+  });
+  await tx.activityLog.create({
+    data: {
+      creatorId,
+      kind: "SYSTEM",
+      type: "GIFT_DEBIT_POSTED",
+      summary: "Gift credit account settled",
+      description: `Gift order #${gift.orderNumber} — all required deliverables received, ${gift.orderTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${gift.currency} debited`,
+      authorId: actorId,
+    },
   });
   return 1;
 }
@@ -525,7 +603,7 @@ export async function resolveGiftRequest(
           authorId: user.id,
         },
       });
-    });
+    }, { timeout: 30000 });
 
     await notify({
       userId: gift.requestedById,
@@ -563,7 +641,7 @@ export async function resolveGiftRequest(
         authorId: user.id,
       },
     });
-  });
+  }, { timeout: 30000 });
 
   await notify({
     userId: gift.requestedById,
@@ -680,7 +758,7 @@ export async function warehouseUpdateGift(
           });
         }
       }
-    });
+    }, { timeout: 30000 });
     await notify({
       userId: gift.requestedById,
       type: "GIFT_DELIVERED",

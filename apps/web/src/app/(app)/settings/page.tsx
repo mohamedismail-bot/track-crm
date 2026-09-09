@@ -35,6 +35,10 @@ interface SettingsData {
   giftMonthlyCapEnabled: boolean;
   giftRequirePreviousDeliverable: boolean;
   giftMinStageId: string | null;
+  creditEnabled: boolean;
+  deliverableApprovalRequired: boolean;
+  currencyCode: string;
+  currencySymbol: string;
   shopifyMinStageId: string | null;
   exportEnabledRoles: string[];
   exportEnabledUserIds: string[];
@@ -170,6 +174,10 @@ export default function SettingsPage() {
       fd.append("giftMonthlyCapEnabled", data.giftMonthlyCapEnabled ? "true" : "false");
       fd.append("giftRequirePreviousDeliverable", data.giftRequirePreviousDeliverable ? "true" : "false");
       fd.append("giftMinStageId", data.giftMinStageId ?? "");
+      fd.append("creditEnabled", data.creditEnabled ? "true" : "false");
+      fd.append("deliverableApprovalRequired", data.deliverableApprovalRequired ? "true" : "false");
+      fd.append("currencyCode", data.currencyCode);
+      fd.append("currencySymbol", data.currencySymbol);
       fd.append("shopifyMinStageId", data.shopifyMinStageId ?? "");
       fd.append("passwordMinLength", String(data.passwordMinLength));
       fd.append("passwordComplexity", data.passwordComplexity ? "true" : "false");
@@ -854,6 +862,52 @@ export default function SettingsPage() {
               </SelectContent>
             </Select>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Credit ledger</CardTitle>
+          <CardDescription>
+            Per-user gifting credit accounts: a +credit when an order is delivered and a
+            single −debit once its required deliverables are received.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Toggle
+            label="Enable credit accounts"
+            checked={data.creditEnabled}
+            onChange={(v) => set("creditEnabled", v)}
+          />
+          <Toggle
+            label="Require Team Manager verification of deliverables"
+            checked={data.deliverableApprovalRequired}
+            onChange={(v) => set("deliverableApprovalRequired", v)}
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="currency-code">Currency code</Label>
+              <Input
+                id="currency-code"
+                placeholder="EGP"
+                value={data.currencyCode}
+                onChange={(e) => set("currencyCode", e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="currency-symbol">Currency symbol</Label>
+              <Input
+                id="currency-symbol"
+                placeholder="EGP"
+                value={data.currencySymbol}
+                onChange={(e) => set("currencySymbol", e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            When verification is off, posting a deliverable&apos;s link marks it delivered
+            directly and settles the ledger at that moment.
+          </p>
         </CardContent>
       </Card>
 
