@@ -6,13 +6,40 @@ import { notify } from "./notify";
 import { requiredForGiftingMissing, REQUIRED_FOR_GIFTING_LABELS, GIFT_STATUS_KEYS } from "./constants";
 import { giftStatusId, giftProductName } from "./gift-status";
 import type { SessionUser } from "./auth";
-import { DealType, DeliverableStatus } from "@prisma/client";
+import { DealType, DeliverableStatus, GiftApprovalRole } from "@prisma/client";
 
 export interface GiftRequestResult {
   ok: boolean;
   needsException: boolean;
   message: string;
   gift?: { id: string };
+}
+
+export interface GiftOrderLineInput {
+  productId?: string | null;
+  productName?: string;
+  productDescription?: string;
+  unitCost?: number;
+  quantity: number;
+}
+
+export interface GiftOrderDeliverableInput {
+  title: string;
+  type: string;
+  dueDate: string;
+}
+
+export interface GiftOrderInput {
+  engagementId: string;
+  action?: "draft" | "submit";
+  agreedBudget?: number | null;
+  commissionRate?: number | null;
+  couponCode?: string | null;
+  shippingAddress?: string | null;
+  lines: GiftOrderLineInput[];
+  /** Agreement deliverables; materialized on the engagement when the order
+   *  reaches a status flagged spawnDeliverables (tagged giftId). */
+  deliverables: GiftOrderDeliverableInput[];
 }
 
 /**
@@ -148,81 +175,172 @@ export async function canRequestGift(user: SessionUser, engagementId: string) {
 }
 
 /**
- * Create a gift request. Returns { needsException } to trigger the manager approval
- * flow for a second gift in the month. A first gift in the month is created directly
- * in the "approved" (warehouse ready) status, preserving pre-order behavior.
+ * Snapshot the catalog/custom picks into GiftLine data. Catalog lines read the
+ * live unit cost (read-only to everyone; set by the Admin) exactly once, so
+ * later catalog edits never change historical orders.
+ */
+async function resolveOrderLines(lines: GiftOrderLineInput[]): Promise<{
+  lines: {
+    productId: string | null;
+    productName: string;
+    productDescription?: string | null;
+    unitCost: number;
+    quantity: number;
+    lineTotal: number;
+  }[];
+  orderTotal: number;
+}> {
+  if (lines.length === 0) return { lines: [], orderTotal: 0 };
+  const resolved: Awaited<ReturnType<typeof resolveOrderLines>>["lines"] = [];
+  let orderTotal = 0;
+
+  for (const raw of lines) {
+    const quantity = Math.max(1, Math.floor(Number(raw.quantity) || 1));
+    let productId: string | null = null;
+    let productName = "";
+    let unitCost = 0;
+    let productDescription: string | undefined;
+
+    if (raw.productId) {
+      const product = await prisma.product.findUnique({ where: { id: raw.productId } });
+      if (!product) throw new Error("A product on this order no longer exists in the catalog.");
+      productId = product.id;
+      productName = product.name;
+      unitCost = product.unitCost;
+    } else {
+      productName = String(raw.productName ?? "").trim();
+      if (!productName) throw new Error("Every order line needs a product.");
+      const cost = Number(raw.unitCost);
+      if (!Number.isFinite(cost) || cost < 0) throw new Error(`"${productName}" needs a valid unit cost.`);
+      unitCost = Math.round(cost * 100) / 100;
+      productDescription = raw.productDescription?.trim() || undefined;
+    }
+
+    const lineTotal = Math.round(unitCost * quantity * 100) / 100;
+    orderTotal = Math.round((orderTotal + lineTotal) * 100) / 100;
+    resolved.push({ productId, productName, productDescription, unitCost, quantity, lineTotal });
+  }
+
+  return { lines: resolved, orderTotal };
+}
+
+/** The status a submitted order is created in: the first approval-bearing step,
+ *  else the first spawnDeliverables step, else the first active step. */
+async function submitTargetStatusId(): Promise<string> {
+  const statuses = await prisma.giftStatus.findMany({ orderBy: { position: "asc" } });
+  const active = statuses.filter((s) => !s.isDraft && !s.isRejection);
+  const pending = active.find((s) => s.approvalRole !== GiftApprovalRole.NONE);
+  if (pending) return pending.id;
+  const spawn = active.find((s) => s.spawnDeliverables);
+  if (spawn) return spawn.id;
+  return active[0]?.id ?? (await giftStatusId(GIFT_STATUS_KEYS.PENDING_MANAGER));
+}
+
+/**
+ * Create a Gift Order from the full order form. `action: "submit"` runs the
+ * gating hard-stops and lands the order on the first approval step; a second
+ * order in the same month is flagged isException. `action: "draft"` saves a
+ * resumable draft (isDraft status) with no gating beyond team/ownership.
  */
 export async function requestGift(
   user: SessionUser,
-  engagementId: string,
-  input: { productName: string; productDescription?: string },
+  input: GiftOrderInput,
 ): Promise<
   | { ok: true; status: string; message: string; giftId: string }
   | { ok: false; message: string; needsException?: boolean; blocked?: boolean; missingFields?: string[] }
 > {
-  const check = await canRequestGift(user, engagementId);
-  if (check.ok === false) {
-    // A second gift in the same month needs manager approval: it is NOT a dead
-    // end — proceed in exception mode so the gift gets created as pending manager.
-    if (check.blocked || !check.needsException) {
-      return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked, missingFields: check.missingFields };
-    }
-  }
+  const action = input.action === "draft" ? "draft" : "submit";
 
-  // Recompute exception: a second gift in the same month needs manager approval.
-  const settings = await getSettings();
   const engagement = await prisma.engagement.findUnique({
-    where: { id: engagementId },
+    where: { id: input.engagementId },
     include: { creator: true, team: true },
   });
   if (!engagement) return { ok: false, message: "Engagement not found." };
-  const isException =
-    settings.giftMonthlyCapEnabled && (await countCreatorGiftsThisMonth(engagement.creatorId)) >= 1;
+  if (engagement.teamId !== user.teamId) {
+    return { ok: false, message: "You can only request a gift for your team's engagements." };
+  }
 
-  const targetKey = isException ? GIFT_STATUS_KEYS.PENDING_MANAGER : GIFT_STATUS_KEYS.APPROVED;
-  const statusId = await giftStatusId(targetKey);
-  const name = input.productName.trim();
+  const { agreedBudget, commissionRate, couponCode } = input;
+  const deliverables = (input.deliverables ?? [])
+    .filter((d) => d.title?.trim())
+    .map((d) => ({ title: d.title.trim(), type: d.type?.trim() || "Video", dueDate: d.dueDate }));
 
-  const gift = await prisma.gift.create({
-    data: {
-      engagementId,
-      requestedById: user.id,
-      isException,
-      statusId,
-      currency: engagement.currency,
-      approvedById: isException ? undefined : user.id,
-      approvedAt: isException ? undefined : new Date(),
-      lines: {
-        create: {
-          productName: name,
-          productDescription: input.productDescription,
-          unitCost: 0,
-          quantity: 1,
-          lineTotal: 0,
-        },
+  if (action === "submit") {
+    const check = await canRequestGift(user, input.engagementId);
+    if (check.ok === false && (check.blocked || !check.needsException)) {
+      return { ok: false, message: check.message, needsException: check.needsException, blocked: check.blocked, missingFields: check.missingFields };
+    }
+    if (input.lines.length === 0) return { ok: false, message: "Add at least one product line." };
+    if (!input.shippingAddress?.trim()) return { ok: false, message: "A shipping address is required." };
+  }
+
+  let isException = false;
+  if (action === "submit") {
+    const settings = await getSettings();
+    isException =
+      settings.giftMonthlyCapEnabled && (await countCreatorGiftsThisMonth(engagement.creatorId)) >= 1;
+  }
+
+  let orderLines: Awaited<ReturnType<typeof resolveOrderLines>>["lines"] = [];
+  let orderTotal = 0;
+  try {
+    const resolved = await resolveOrderLines(input.lines);
+    orderLines = resolved.lines;
+    orderTotal = resolved.orderTotal;
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Invalid order lines." };
+  }
+
+  const statusId = action === "draft" ? await giftStatusId(GIFT_STATUS_KEYS.DRAFT) : await submitTargetStatusId();
+  const name = giftProductName({
+    lines: orderLines.map((l) => ({ productName: l.productName })),
+    engagement: { creator: engagement.creator },
+  });
+
+  const gift = await prisma.$transaction(async (tx) => {
+    const created = await tx.gift.create({
+      data: {
+        engagementId: input.engagementId,
+        requestedById: user.id,
+        isException,
+        statusId,
+        currency: engagement.currency,
+        shippingAddress: input.shippingAddress?.trim() || undefined,
+        agreedBudget: agreedBudget != null ? Math.round(Number(agreedBudget) * 100) / 100 : undefined,
+        commissionRate: commissionRate != null ? Math.round(Number(commissionRate) * 100) / 100 : undefined,
+        couponCode: action === "submit" ? couponCode?.trim() || undefined : undefined,
+        orderTotal,
+        agreement: deliverables.length > 0 ? deliverables : undefined,
+        lines: { create: orderLines.map((l) => ({ ...l })) },
       },
-    },
+    });
+    await tx.activityLog.create({
+      data: {
+        creatorId: engagement.creatorId,
+        kind: "SYSTEM",
+        type: "GIFT_REQUESTED",
+        summary:
+          action === "draft"
+            ? "Gift order saved as draft"
+            : isException
+              ? "Gift order requested with exception approval"
+              : "Gift order submitted for approval",
+        description: `${name} - order #${created.orderNumber}${isException ? " (exception: second gift this month)" : ""}`,
+        authorId: user.id,
+      },
+    });
+    return created;
   });
 
-  await logActivity({
-    creatorId: engagement.creatorId,
-    kind: "SYSTEM",
-    type: "GIFT_REQUESTED",
-    summary: isException
-      ? `Gift requested with exception approval`
-      : `Gift requested and queued`,
-    description: `${name}${isException ? " (exception: second gift this month)" : ""}`,
-    authorId: user.id,
-  });
   await logTransaction({
     userId: user.id,
     action: "gift.request",
     entityType: "Gift",
     entityId: gift.id,
-    detail: `Requested ${name} for ${engagement.creator.name}`,
+    detail: `${action === "draft" ? "Drafted" : "Requested"} ${name} for ${engagement.creator.name} (order #${gift.orderNumber})`,
   });
 
-  if (isException) {
+  if (action === "submit") {
     const managers = await prisma.user.findMany({
       where: { teamId: user.teamId, role: { is: { slug: "team-manager" } }, archivedAt: null },
     });
@@ -230,17 +348,19 @@ export async function requestGift(
       managers.map((m) =>
         notify({
           userId: m.id,
-          type: "GIFT_EXCEPTION_REQUESTED",
-          title: "Gift exception approval requested",
+          type: isException ? "GIFT_EXCEPTION_REQUESTED" : "GIFT_REQUESTED",
+          title: isException ? "Gift exception approval requested" : "Gift order submitted for approval",
           body: `${name} for ${engagement.creator.name}`,
-          link: `/gifting`,
+          link: "/gifting",
         }),
       ),
     );
-    return { ok: true, status: GIFT_STATUS_KEYS.PENDING_MANAGER, message: "Exception gift request sent for manager approval.", giftId: gift.id };
   }
 
-  return { ok: true, status: GIFT_STATUS_KEYS.APPROVED, message: "Gift approved and queued for warehouse.", giftId: gift.id };
+  if (action === "draft") {
+    return { ok: true, status: GIFT_STATUS_KEYS.DRAFT, message: "Draft saved. You can continue it from the Gifting page.", giftId: gift.id };
+  }
+  return { ok: true, status: (await prisma.giftStatus.findUnique({ where: { id: gift.statusId } }))?.key ?? "", message: isException ? "Gift order sent for exception approval." : "Gift order submitted for approval.", giftId: gift.id };
 }
 
 export async function resolveGiftRequest(

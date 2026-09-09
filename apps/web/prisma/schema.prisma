@@ -103,6 +103,7 @@ enum NotificationType {
   DELIVERABLE_APPROVED
   DELIVERABLE_REVISION_REQUESTED
   GIFT_EXCEPTION_REQUESTED
+  GIFT_REQUESTED
   GIFT_DISPATCHED
   GIFT_DELIVERED
   GIFT_APPROVED
@@ -528,6 +529,10 @@ model Gift {
   agreedBudget    Float?
   commissionRate  Float?
   couponCode      String?
+  /** Agreement deliverables [{ title, type, dueDate }] captured on the order form,
+   *  handed to the engagement as real Deliverable records (tagged giftId) when the
+   *  order reaches a status flagged spawnDeliverables. */
+  agreement       Json?
   createdAt       DateTime  @default(now())
 
   status     GiftStatus @relation(fields: [statusId], references: [id], onDelete: Restrict)

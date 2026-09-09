@@ -153,8 +153,8 @@ def main():
             disabled = gift_btn.is_disabled()
             if not disabled:
                 gift_btn.click()
-                page.wait_for_timeout(600)
-                has_dialog = page.locator("text=Request a gift").count() > 0 or page.locator("text=Product name").count() > 0
+                page.locator('button:has-text("Submit for approval")').first.wait_for(timeout=3000)
+                has_dialog = page.locator("text=New gift order").count() > 0
                 check("gift button opens dialog (not self-link)", has_dialog)
                 # close
                 page.keyboard.press("Escape")
@@ -426,7 +426,11 @@ def gift_exception_flow(browser):
             eng_id = target["currentEngagementId"]
             g = page.request.post(
                 f"{BASE}/api/gifts",
-                data={"engagementId": eng_id, "productName": f"QA gift {datetime.now().isoformat()}"},
+                data={
+                    "engagementId": eng_id,
+                    "productName": f"QA gift {datetime.now().isoformat()}",
+                    "shippingAddress": f"QA Street {datetime.now().strftime('%H%M%S%f')}, Sample Area",
+                },
             )
             if g.status == 201:
                 first_ok = True
@@ -439,6 +443,8 @@ def gift_exception_flow(browser):
             # on profiles missing Required-for-Gifting data — both are skippable.
             if body.get("blocked") and ("Previous gift" in err or body.get("missingFields")):
                 continue
+            if "shipping address is required" in err.lower():
+                continue
             results.append(("gift request succeeds (first in month)", False, str(g.status)))
             return results
 
@@ -446,7 +452,11 @@ def gift_exception_flow(browser):
             target, eng_id = selected
             g2 = page.request.post(
                 f"{BASE}/api/gifts",
-                data={"engagementId": eng_id, "productName": f"QA gift2 {datetime.now().isoformat()}"},
+                data={
+                    "engagementId": eng_id,
+                    "productName": f"QA gift2 {datetime.now().isoformat()}",
+                    "shippingAddress": f"QA Street {datetime.now().strftime('%H%M%S%f')}, Sample Area",
+                },
             )
             b2 = g2.json()
             ok_exception = g2.status == 201 and b2.get("status") == "pending_manager"

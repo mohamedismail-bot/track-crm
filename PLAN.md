@@ -1,6 +1,6 @@
 # PLAN — Full-Cycle Gift Order, Deliverables, Credit & Logistics
 
-**Status: Pending approval. No code is written until you approve this plan.**
+**Status: Building. Phases 1–4 shipped (schema+status engine, catalog, order form). Remaining: approval/deliverable spawn, warehouse label, credit ledger, notifications/dashboard/reports.**
 
 Refactors the current simple "Request Gift" (engagement + product-name string) into a full **Gift Order** lifecycle: multi-line product orders, agreement (budget/commission + deliverables), configurable approval chain, warehouse shipping labels, and a per-user **Credit Account** ledger.
 
@@ -118,11 +118,11 @@ Hard-stop checks run on submit (unchanged, in `lib/gifts.ts`):
 
 ## 10. Delivery phases
 
-1. **Schema + migration** — new models, `Gift` changes, status seed, enum removal.
-2. **Status engine** — `GiftStatus` CRUD API + Settings card; replace enum reads with flag reads in `lib/gifts.ts`.
-3. **Catalog** — models + Admin CRUD API + Settings card.
-4. **Order form** — Agreement + product grid + shipping + draft/submit; rework `requestGift` (all orders → first status; exception flag).
-5. **Approval + deliverable spawn** — approve/reject moves by `position`; transactional `spawnDeliverables`.
+1. ~~**Schema + migration**~~ ✅ — new models, `Gift` changes, status seed, enum removal (UAT round 7).
+2. ~~**Status engine**~~ ✅ — `GiftStatus` CRUD API + Settings card; enum reads replaced with flag reads in `lib/gifts.ts` (round 7).
+3. ~~**Catalog**~~ ✅ — models + Admin CRUD API + Settings card + demo seed (round 8).
+4. ~~**Order form**~~ ✅ — Agreement + product grid + shipping + draft/submit; `requestGift` reworked (all orders → first status; exception flag). `Gift.agreement` JSON holds the deliverables pending spawn (round 9).
+5. **Approval + deliverable spawn** — approve/reject moves by `position`; transactional `spawnDeliverables` (materializes `Gift.agreement`).
 6. **Warehouse** — DispatchCard label panel + ship/deliver + print label; deliver posts credit.
 7. **Credit ledger** — accounts, debit on final approval, transaction, `credit.view` routes, Credit page + chip + Settings toggles.
 8. **Notifications + dashboard + reports** — wiring and new insights.

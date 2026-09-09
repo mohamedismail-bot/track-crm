@@ -33,10 +33,16 @@ interface QueueGift {
   productName: string;
   productDescription: string | null;
   status: string;
+  statusKey: string;
   statusLabel?: string;
-  group?: "pending" | "warehouse" | "history";
+  group?: "pending" | "warehouse" | "history" | "draft";
   isException: boolean;
   exceptionReason: string | null;
+  shippingAddress: string | null;
+  shippingLabel?: string;
+  orderTotal: number;
+  currency: string;
+  lines: { id: string; productName: string; unitCost: number; quantity: number; lineTotal: number }[];
   trackingNumber: string | null;
   carrier: string | null;
   requestedAt: string;
@@ -53,7 +59,7 @@ interface QueueGift {
 export default function GiftingPage() {
   const searchParams = useSearchParams();
   const tabFromUrl = searchParams.get("tab");
-  const initialTab = ["pending", "warehouse", "history"].includes(tabFromUrl ?? "") ? tabFromUrl! : "pending";
+  const initialTab = ["pending", "warehouse", "history", "draft"].includes(tabFromUrl ?? "") ? tabFromUrl! : "pending";
   const [gifts, setGifts] = React.useState<QueueGift[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [me, setMe] = React.useState<{
@@ -87,6 +93,7 @@ export default function GiftingPage() {
 
   const pending = gifts.filter((g) => g.group === "pending");
   const queued = gifts.filter((g) => g.group === "warehouse");
+  const drafts = gifts.filter((g) => g.group === "draft");
   const delivered = gifts.filter((g) => g.group === "history");
 
   const patch = async (id: string, body: Record<string, unknown>) => {
@@ -126,6 +133,7 @@ export default function GiftingPage() {
             ) : null}
           </TabsTrigger>
           <TabsTrigger value="warehouse">Warehouse ({queued.length})</TabsTrigger>
+          {drafts.length > 0 ? <TabsTrigger value="draft">Drafts ({drafts.length})</TabsTrigger> : null}
           <TabsTrigger value="history">History ({delivered.length})</TabsTrigger>
         </TabsList>
 
@@ -157,6 +165,12 @@ export default function GiftingPage() {
                       <p className="mt-1 text-sm text-muted-foreground">
                         {g.creatorName} · {g.engagementTitle} · {g.teamName}
                       </p>
+                      {g.orderTotal > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          {g.lines.length} line{g.lines.length === 1 ? "" : "s"} · Total {g.orderTotal.toLocaleString()} {g.currency}
+                          {g.shippingAddress ? " · " + g.shippingAddress : ""}
+                        </p>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">
                         Requested by {g.requestedByName} · {formatDateTime(g.requestedAt)}
                       </p>
@@ -211,6 +225,44 @@ export default function GiftingPage() {
                 }
                 onDeliver={() => patch(g.id, { action: "deliver" })}
               />
+            ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="draft" className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Gift orders saved as drafts. Continue and submit them from the creator&apos;s profile.
+          </p>
+          {loading ? (
+            <Skeleton className="h-40 w-full" />
+          ) : drafts.length === 0 ? (
+            <EmptyState text="No draft orders." />
+          ) : (
+            drafts.map((g) => (
+              <Card key={g.id}>
+                <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{g.lines[0]?.productName ?? g.productName}</p>
+                      <GiftStatusBadge status={g.status} />
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {g.creatorName} · {g.engagementTitle} · {g.teamName}
+                    </p>
+                    {g.orderTotal > 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        {g.lines.length} line{g.lines.length === 1 ? "" : "s"} · Total {g.orderTotal.toLocaleString()} {g.currency}
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      Saved {formatDateTime(g.requestedAt)} by {g.requestedByName}
+                    </p>
+                  </div>
+                  <Button size="sm" className="shrink-0" asChild>
+                    <a href={`/creators/${g.creatorId}?gift=${g.id}&giftTab=gifts`}>Continue draft</a>
+                  </Button>
+                </CardContent>
+              </Card>
             ))
           )}
         </TabsContent>

@@ -53,16 +53,22 @@ export async function GET(req: NextRequest) {
       status: g.status.key,
       statusKey: g.status.key,
       statusLabel: g.status.label,
-      group:
-        g.status.approvalRole !== GiftApprovalRole.NONE
+      group: g.status.isDraft
+        ? "draft"
+        : g.status.approvalRole !== GiftApprovalRole.NONE
           ? "pending"
           : g.status.warehouseStep
             ? "warehouse"
             : "history",
       isException: g.isException,
       exceptionReason: g.exceptionReason,
+      shippingAddress: g.shippingAddress,
       trackingNumber: g.trackingNumber,
       carrier: g.carrier,
+      currency: g.currency,
+      agreedBudget: g.agreedBudget,
+      commissionRate: g.commissionRate,
+      couponCode: g.couponCode,
       requestedAt: g.requestedAt,
       dispatchedAt: g.dispatchedAt,
       deliveredAt: g.deliveredAt,

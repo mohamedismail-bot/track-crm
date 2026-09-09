@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ExternalLink,
@@ -75,6 +75,7 @@ import {
 import { ACTIVITY_TYPE_LABELS, profileHref } from "@/lib/constants";
 import { CreatorFormDialog, type EditableCreatorInput } from "@/components/creators/creator-form";
 import { StageChangeDialog, moveStageWithReason } from "@/components/creators/stage-change-dialog";
+import { GiftOrderDialog, type DraftOrder } from "@/components/gifts/gift-order-dialog";
 import type { Platform, DealType, ApprovalStatus } from "@prisma/client";
 
 type Relationship = "owned" | "same_team" | "same_team_manager" | "other_team" | "available" | "none";
@@ -97,14 +98,32 @@ interface Deliverable {
   reviewComment: string | null;
 }
 
+interface GiftLine {
+  id: string;
+  productId: string | null;
+  productName: string;
+  unitCost: number;
+  quantity: number;
+  lineTotal: number;
+}
+
 interface Gift {
   id: string;
+  engagementId: string;
   productName: string;
   status: string;
   isException: boolean;
   exceptionReason: string | null;
   trackingNumber: string | null;
   carrier: string | null;
+  shippingAddress: string | null;
+  orderTotal: number;
+  currency: string;
+  agreedBudget: number | null;
+  commissionRate: number | null;
+  couponCode: string | null;
+  lines: GiftLine[];
+  agreement: { title: string; type: string; dueDate: string }[] | null;
   requestedAt: string;
 }
 
@@ -134,6 +153,8 @@ interface ActivityEntry {
   loggedAt: string;
   attachments: { id: string; filename: string; type?: string; path: string }[];
 }
+
+type DraftGift = DraftOrder;
 
 interface CreatorDetail {
   id: string;
@@ -316,10 +337,14 @@ export default function CreatorProfilePage() {
   const [pendingStage, setPendingStage] = React.useState<string | null>(null);
   const [stageBusy, setStageBusy] = React.useState(false);
   const [giftOpen, setGiftOpen] = React.useState(false);
-  const [giftEngagementId, setGiftEngagementId] = React.useState("");
-  const [giftProductName, setGiftProductName] = React.useState("");
-  const [giftDescription, setGiftDescription] = React.useState("");
-  const [giftBusy, setGiftBusy] = React.useState(false);
+  const [giftDraft, setGiftDraft] = React.useState<DraftGift | null>(null);
+  const searchParams = useSearchParams();
+  const giftParam = searchParams.get("gift");
+  const tabParam = searchParams.get("giftTab");
+  const [tab, setTab] = React.useState<string>(
+    ["activity", "engagements", "deliverables", "gifts", "details"].includes(tabParam ?? "") ? tabParam! : "activity",
+  );
+  const giftSeededRef = React.useRef(false);
   const [rejectOpen, setRejectOpen] = React.useState(false);
   const [rejectReason, setRejectReason] = React.useState("");
   const [reviewBusy, setReviewBusy] = React.useState(false);
@@ -460,49 +485,50 @@ export default function CreatorProfilePage() {
     load();
   };
 
-  const openGift = () => {
-    const defaultEngagement = creator?.engagements[0]?.id ?? "";
-    setGiftEngagementId(defaultEngagement);
-    setGiftProductName("");
-    setGiftDescription("");
+  const openGift = (draft: Gift | null) => {
+    setGiftDraft(
+      draft
+        ? {
+            id: draft.id,
+            engagementId: "",
+            shippingAddress: draft.shippingAddress,
+            agreedBudget: draft.agreedBudget,
+            commissionRate: draft.commissionRate,
+            couponCode: draft.couponCode,
+            currency: draft.currency,
+            lines: draft.lines.map((l) => ({ ...l })),
+            agreement: draft.agreement,
+          }
+        : null,
+    );
     setGiftOpen(true);
   };
 
-  const requestGift = async () => {
-    if (!giftEngagementId || !giftProductName.trim()) {
-      return toast({ title: "Engagement and product name are required", variant: "destructive" });
-    }
-    setGiftBusy(true);
-    try {
-      const res = await fetch(`/api/gifts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          engagementId: giftEngagementId,
-          productName: giftProductName,
-          productDescription: giftDescription || undefined,
-        }),
-      });
-      const j = await res.json();
-      if (!res.ok) {
-        if (j.missingFields?.length) {
-          return toast({
-            title: "This creator is missing data required for gifting",
-            description: `Missing: ${j.missingFields.join(", ")}`,
-            variant: "destructive",
-          });
-        }
-        return toast({ title: j.error ?? "Could not request gift", variant: "destructive" });
+  // Resume a draft from the Gifting page: ?gift=<draftId>&giftTab=gifts opens the
+  // order form prefilled with the saved draft.
+  React.useEffect(() => {
+    if (!creator || giftSeededRef.current) return;
+    if (giftParam) {
+      const draftGift = creator.engagements
+        .flatMap((e) => e.gifts)
+        .find((g) => g.id === giftParam && g.status === "draft");
+      if (draftGift) {
+        setGiftDraft({
+          id: draftGift.id,
+          engagementId: draftGift.engagementId ?? "",
+          shippingAddress: draftGift.shippingAddress,
+          agreedBudget: draftGift.agreedBudget,
+          commissionRate: draftGift.commissionRate,
+          couponCode: draftGift.couponCode,
+          currency: draftGift.currency,
+          lines: draftGift.lines.map((l) => ({ ...l })),
+          agreement: draftGift.agreement,
+        });
+        setGiftOpen(true);
+        giftSeededRef.current = true;
       }
-      toast({ title: j.message ?? "Gift requested" });
-      setGiftOpen(false);
-      load();
-    } catch {
-      toast({ title: "Could not request gift", variant: "destructive" });
-    } finally {
-      setGiftBusy(false);
     }
-  };
+  }, [creator, giftParam]);
 
   const review = async (decision: "approve" | "reject") => {
     setReviewBusy(true);
@@ -792,64 +818,33 @@ export default function CreatorProfilePage() {
         busy={stageBusy}
       />
 
-      <Dialog open={giftOpen} onOpenChange={setGiftOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Request a gift</DialogTitle>
-            <DialogDescription>
-              Send a product to {creator.name}. A second gift in the same month requires manager approval.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-1 gap-3">
-            <div>
-              <Label htmlFor="gift-engagement">Engagement</Label>
-              <select
-                id="gift-engagement"
-                className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                value={giftEngagementId}
-                onChange={(e) => setGiftEngagementId(e.target.value)}
-              >
-                {creator.engagements.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.title} · {e.team.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label htmlFor="gift-name">Product name</Label>
-              <Input
-                id="gift-name"
-                className="mt-1"
-                placeholder="e.g. Wireless headphones"
-                value={giftProductName}
-                onChange={(e) => setGiftProductName(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="gift-desc">Description (optional)</Label>
-              <Input
-                id="gift-desc"
-                className="mt-1"
-                placeholder="Color, model, size…"
-                value={giftDescription}
-                onChange={(e) => setGiftDescription(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setGiftOpen(false)}>Cancel</Button>
-            <Button onClick={requestGift} disabled={giftBusy}>
-              {giftBusy ? "Requesting…" : "Request gift"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {creator ? (
+        <GiftOrderDialog
+          open={giftOpen}
+          onOpenChange={(v) => {
+            setGiftOpen(v);
+            if (!v) giftSeededRef.current = false;
+          }}
+          creatorName={creator.name}
+          engagements={creator.engagements.map((e) => ({
+            id: e.id,
+            title: e.title,
+            dealType: e.dealType,
+            currency: e.currency,
+            team: { name: e.team.name },
+          }))}
+          draft={giftDraft}
+          previousAddresses={Array.from(
+            new Set(creator.engagements.flatMap((e) => e.gifts.map((g) => g.shippingAddress).filter((a): a is string => Boolean(a && a.trim())))),
+          )}
+          onSubmitted={() => load()}
+        />
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <Tabs defaultValue="activity">
-            <TabsList className="mb-4">
+          <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="mb-4">
               <TabsTrigger value="activity">Activity</TabsTrigger>
               {creator.canViewFull ? (
                 <>
@@ -996,6 +991,17 @@ export default function CreatorProfilePage() {
                           <p className="text-xs text-muted-foreground">
                             {e.title} · requested {formatDateTime(g.requestedAt)}
                           </p>
+                          {g.lines.length > 1 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {g.lines.map((l) => l.productName).join(", ")}
+                            </p>
+                          ) : null}
+                          {g.orderTotal > 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {g.lines.length} line{g.lines.length === 1 ? "" : "s"} · {formatMoney(g.orderTotal, g.currency)}
+                              {g.shippingAddress ? " · " + g.shippingAddress : ""}
+                            </p>
+                          ) : null}
                           {g.trackingNumber ? (
                             <p className="text-xs text-muted-foreground">
                               {g.carrier} · {g.trackingNumber}
@@ -1128,7 +1134,7 @@ export default function CreatorProfilePage() {
                   variant="outline"
                   className="w-full"
                   size="sm"
-                  onClick={openGift}
+                  onClick={() => openGift(null)}
                   disabled={creator.engagements.length === 0 || (creator.incompleteData && creator.isOwnedByMe)}
                 >
                   <PackagePlus className="mr-1 h-4 w-4" /> Request gift
