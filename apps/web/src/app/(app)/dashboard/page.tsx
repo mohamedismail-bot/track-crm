@@ -13,6 +13,7 @@ import {
   ClipboardCheck,
   Truck,
   PackageCheck,
+  Wallet,
   UserCircle2,
 } from "lucide-react";
 import {
@@ -27,6 +28,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, initials, isOverdue } from "@/lib/display";
 import { GIFT_STATUS_KEYS } from "@/lib/constants";
+
+interface CreditBlock {
+  enabled: boolean;
+  currencyCode: string;
+  currencySymbol: string;
+  totalOutstanding: number;
+  topSpenders: { userId: string; name: string; team: string; balance: number; transactionCount: number }[];
+}
+
+interface ExceptionsBlock {
+  active: {
+    id: string;
+    orderNumber: number;
+    statusKey: string;
+    statusLabel: string;
+    requesterName: string;
+    requestedAt: string;
+    creatorId: string;
+    creatorName: string;
+    teamName: string;
+  }[];
+}
 
 interface DashboardData {
   role: { roleSlug: string; isWarehouse: boolean; canApprove: boolean; canFulfill: boolean };
@@ -57,12 +80,18 @@ interface DashboardData {
   pipeline: { stageId: string; name: string; count: number }[];
   leaderboard: { userId: string; name: string; creators: number }[];
   myCreatorsDetail: { id: string; name: string; handle: string | null }[];
+  credit?: CreditBlock | null;
+  exceptions?: ExceptionsBlock | null;
 }
 
 function giftCounts(recent: DashboardData["gifts"]["recent"]) {
   const pending = recent.filter((g) => g.status === GIFT_STATUS_KEYS.PENDING_MANAGER);
   const queued = recent.filter((g) => g.status === GIFT_STATUS_KEYS.APPROVED);
   return { pending, queued };
+}
+
+function formatMoney(n: number, symbol: string) {
+  return `${symbol} ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
 export default function DashboardPage() {
@@ -250,6 +279,39 @@ export default function DashboardPage() {
             <TopGiftedCard creators={data.gifts.topGiftedCreators} />
           </section>
 
+          {(data.credit || data.exceptions) ? (
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Credit & exceptions
+              </h2>
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                {data.credit && data.credit.enabled ? (
+                  <StatCard icon={<Wallet className="h-4 w-4" />} label="Credit outstanding"
+                    value={formatMoney(data.credit.totalOutstanding, data.credit.currencySymbol)}
+                    warning={data.credit.totalOutstanding > 0}
+                    href="/credit" expanded={openSections.credit} onToggle={() => toggle("credit")}>
+                    <DetailList items={data.credit.topSpenders.map((s) => ({
+                      href: "/credit", primary: s.name,
+                      secondary: s.team, right: formatMoney(s.balance, data.credit?.currencySymbol ?? "EGP"),
+                    }))} emptyText="No outstanding credit." href="/credit" />
+                  </StatCard>
+                ) : null}
+                {data.exceptions ? (
+                  <StatCard icon={<AlertTriangle className="h-4 w-4" />} label="Active exception orders"
+                    value={data.exceptions.active.length}
+                    warning={data.exceptions.active.length > 0}
+                    href="/gifting?tab=pending" expanded={openSections.exceptions} onToggle={() => toggle("exceptions")}>
+                    <DetailList items={data.exceptions.active.map((x) => ({
+                      href: `/creators/${x.creatorId}`, primary: x.creatorName,
+                      secondary: `${x.requesterName} · ${x.teamName}`,
+                      right: x.statusLabel, badge: "Exception",
+                    }))} emptyText="No active exception orders." href="/gifting?tab=pending" />
+                  </StatCard>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
           <section className="space-y-3">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Deliverables
@@ -420,7 +482,7 @@ function StatCard({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: number;
+  value: number | string;
   warning?: boolean;
   href: string;
   expanded?: boolean;

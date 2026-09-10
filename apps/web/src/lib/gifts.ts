@@ -759,11 +759,14 @@ export async function warehouseUpdateGift(
         }
       }
     }, { timeout: 30000 });
+    const credited = next.grantCredit && settings.creditEnabled;
     await notify({
       userId: gift.requestedById,
       type: "GIFT_DELIVERED",
       title: "Gift delivered",
-      body: name,
+      body: credited
+        ? `${name} — ${gift.orderTotal.toLocaleString()} ${gift.currency} credited to your credit account`
+        : name,
       link: "/gifting",
     });
   }

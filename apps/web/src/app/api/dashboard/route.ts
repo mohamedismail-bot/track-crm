@@ -4,6 +4,7 @@ import { requireApiUser } from "@/lib/api-utils";
 import type { SessionUser } from "@/lib/auth";
 import { addDays, startOfMonth, endOfMonth, subDays } from "date-fns";
 import { DeliverableStatus, GiftApprovalRole } from "@prisma/client";
+import { getSettings } from "@/lib/settings";
 
 export async function GET() {
   const user = await requireApiUser();
@@ -33,6 +34,7 @@ export async function GET() {
     giftsQueued,
     giftsDispatchedThisMonth,
     giftsDeliveredThisMonth,
+    giftReportAgg,
     pipelineCounts,
     ownedByMe,
   ] = await Promise.all([
@@ -94,6 +96,15 @@ export async function GET() {
         deliveredAt: { gte: monthStart, lte: monthEnd },
         engagement: giftTeamWhere,
       },
+    }),
+    prisma.gift.aggregate({
+      where: {
+        engagement: giftTeamWhere,
+        requestedAt: { gte: monthStart, lte: monthEnd },
+        status: { is: { isDraft: false, isRejection: false } },
+      },
+      _count: { _all: true },
+      _sum: { orderTotal: true },
     }),
     prisma.engagement.groupBy({
       by: ["stageId"],
@@ -168,6 +179,83 @@ export async function GET() {
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 
+  // Gifting report aggregates (order totals + average order value, this month).
+  const settings = await getSettings();
+  const orderValueThisMonth = Number(giftReportAgg._sum.orderTotal ?? 0);
+  const giftReport = {
+    currencyCode: settings.currencyCode,
+    currencySymbol: settings.currencySymbol,
+    totalOrders: giftReportAgg._count._all,
+    orderValue: orderValueThisMonth,
+    averageOrderValue: giftReportAgg._count._all
+      ? orderValueThisMonth / giftReportAgg._count._all
+      : 0,
+  };
+
+  // Managers/Admin: credit outstanding per user (top spenders + balances) and
+  // active exception orders. Warehouse and leaders see neither block.
+  let credit = null;
+  let exceptions = null;
+  if (!isWarehouse) {
+    const isManagerOrAdmin = isAdmin || session.roleSlug === "team-manager";
+    if (session.permissions.includes("credit.view")) {
+      const accounts = await prisma.creditAccount.findMany({
+        where: {
+          user: { archivedAt: null, ...(isAdmin ? {} : { teamId: session.teamId }) },
+        },
+        include: {
+          user: { select: { id: true, displayName: true, team: { select: { name: true } } } },
+          _count: { select: { transactions: true } },
+        },
+        orderBy: { balance: "desc" },
+        take: 50,
+      });
+      credit = {
+        enabled: settings.creditEnabled,
+        currencyCode: settings.currencyCode,
+        currencySymbol: settings.currencySymbol,
+        totalOutstanding: accounts.reduce((s, a) => s + a.balance, 0),
+        topSpenders: accounts.slice(0, 5).map((a) => ({
+          userId: a.user.id,
+          name: a.user.displayName,
+          team: a.user.team?.name ?? "—",
+          balance: a.balance,
+          transactionCount: a._count.transactions,
+        })),
+      };
+    }
+    if (isManagerOrAdmin) {
+      const activeExceptionGifts = await prisma.gift.findMany({
+        where: {
+          isException: true,
+          status: { is: { isDraft: false, isRejection: false } },
+          engagement: giftTeamWhere,
+        },
+        include: {
+          status: true,
+          requestedBy: { select: { id: true, displayName: true } },
+          engagement: { include: { creator: true, team: true } },
+        },
+        orderBy: { requestedAt: "desc" },
+        take: 20,
+      });
+      exceptions = {
+        active: activeExceptionGifts.map((g) => ({
+          id: g.id,
+          orderNumber: g.orderNumber,
+          statusKey: g.status.key,
+          statusLabel: g.status.label,
+          requestedById: g.requestedById,
+          requesterName: g.requestedBy?.displayName ?? "Unknown",
+          requestedAt: g.requestedAt,
+          creatorId: g.engagement.creatorId,
+          creatorName: g.engagement.creator.name,
+          teamName: g.engagement.team.name,
+        })),
+      };
+    }
+  }
+
   return NextResponse.json({
     role: {
       roleSlug: session.roleSlug,
@@ -207,6 +295,7 @@ export async function GET() {
       queuedForDispatch: giftsQueued,
       dispatchedThisMonth: giftsDispatchedThisMonth,
       deliveredThisMonth: giftsDeliveredThisMonth,
+      report: giftReport,
       topGiftedCreators,
       recent: recentGifts.map((g) => ({
         id: g.id,
@@ -222,5 +311,7 @@ export async function GET() {
     pipeline,
     leaderboard,
     myCreatorsDetail,
+    credit,
+    exceptions,
   });
 }
