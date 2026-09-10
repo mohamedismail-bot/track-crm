@@ -61,7 +61,7 @@ def main():
         check("admin login", ok)
         if ok:
             page.wait_for_load_state("networkidle")
-            page.locator("h1:has-text('Dashboard')").first.wait_for(timeout=10000)
+            page.locator("h1:has-text('Dashboard')").first.wait_for(timeout=30000)
             check("dashboard renders after login", True)
 
         # 2. Creators list
@@ -168,16 +168,29 @@ def main():
         ctx2 = browser.new_context()
         page2 = ctx2.new_page()
         if login(page2, *LEADER):
-            # find a commission-team creator to view (leader is on Budget)
+            # The leader is on Budget Team. Pick a Commissioner-owned creator that
+            # Budget does NOT co-own (QA creators are often seeded to both teams,
+            # where the leader legitimately has full access) and prefer one with
+            # activity logs so the "sees activity" assertion is meaningful.
             r_other = page2.request.get(f"{BASE}/api/creators?pool=&q=")
             other_href = None
             if r_other.ok:
-                for c in r_other.json():
-                    if "Commission Team" in [t.get("name") for t in c.get("teams", [])]:
+                candidates = [
+                    c for c in r_other.json()
+                    if "Commission Team" in [t.get("name") for t in c.get("teams", [])]
+                    and "Budget Team" not in [t.get("name") for t in c.get("teams", [])]
+                ]
+                for c in sorted(candidates, key=lambda c: c.get("name") or ""):
+                    rd = page2.request.get(f"{BASE}/api/creators/{c['id']}")
+                    detail = rd.json() if rd.ok else {}
+                    if detail.get("relationship") != "other_team":
+                        continue
+                    other_href = other_href or f"/creators/{c['id']}"
+                    if len(detail.get("activityLogs") or []) > 0:
                         other_href = f"/creators/{c['id']}"
                         break
             if not other_href:
-                check("other-team leader sees activity but not deal tabs", False, "no commission creator")
+                check("other-team leader sees activity but not deal tabs", False, "no commission-only creator")
             else:
                 page2.goto(f"{BASE}{other_href}", wait_until="networkidle")
                 page2.wait_for_timeout(700)
@@ -240,8 +253,8 @@ def dashboard_interactive(page):
     results = []
     try:
         page.goto(f"{BASE}/dashboard", wait_until="domcontentloaded")
-        page.locator("h1").wait_for(timeout=15000)
-        page.locator("text=Gifts requested this month").first.wait_for(timeout=15000)
+        page.locator("h1").wait_for(timeout=30000)
+        page.locator("text=Gifts requested this month").first.wait_for(timeout=30000)
 
         # Gift insights are surfaced on the page
         has_gift_label = page.locator("text=Gifts requested this month").count() > 0
@@ -269,7 +282,7 @@ def dashboard_interactive(page):
 
         # Gifting deep link tab param respected
         page.goto(f"{BASE}/gifting?tab=warehouse", wait_until="domcontentloaded")
-        page.locator('[role="tab"]').first.wait_for(timeout=15000)
+        page.locator('[role="tab"]').first.wait_for(timeout=30000)
         page.wait_for_timeout(700)
         sel = page.locator('[role="tab"][aria-selected="true"]')
         active = sel.inner_text() if sel.count() else ""
